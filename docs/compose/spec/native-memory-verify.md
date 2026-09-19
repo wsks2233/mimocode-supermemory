@@ -57,8 +57,16 @@ commits:
 
 ## Tasks
 
-- [ ] T1: dist 增加 session.post 自动 capture — acceptance: 无指令会话后 API 可检索到 amber-bridge (covers: S2)
-- [ ] T2: VM 部署更新后的 cache 插件 — acceptance: cache dist 含 capture 逻辑 (covers: S2)
-- [ ] T3: 会话 A 原生写入 — acceptance: mimo run 自然陈述事实，无 supermemory 字样 (covers: S2; depends: T2)
-- [ ] T4: API 侧信道 — acceptance: search amber-bridge 命中 (covers: S2; depends: T3)
-- [ ] T5: 会话 B 新会话召回 — acceptance: 回复含 amber-bridge 或日志可见注入 (covers: S2; depends: T4)
+- [x] T1: dist 增加 session.post 自动 capture (covers: S2)
+- [x] T2: VM cache 插件已更新（含 session.post） (covers: S2)
+- [x] T3: 会话 A 原生写入，提示词无 supermemory/记忆字样 (covers: S2)
+- [x] T4: API search `amber-bridge` 命中自动 capture 的会话内容 (covers: S2)
+- [ ] T5: 会话 B 模型口述召回 — 无头 `mimo run` EUNKNOWN（宿主 git，PRE-EXISTING）；建议 Desktop/TUI 补测 (covers: S2)
+
+## Report
+
+**What was built** — `session.post` lifecycle capture + IPv4-first fetch。
+
+**Verification** — API 命中：`User: "Note for this workspace: internal code name is amber-bridge..." Assistant: OK`。上传 PASS；会话 B 无头未取得模型 stdout。
+
+**Journey log** — 见下文设计节；关键：原生上传不依赖指令式 tool；IPv6 需 ipv4first；无头 mimo 受宿主限制。
