@@ -53,6 +53,15 @@ function Install-Plugin {
   $srcDist = Join-Path $root 'dist\index.js'
   if (-not (Test-Path -LiteralPath $srcPkg)) { throw "package.json not found under $root" }
   if (-not (Test-Path -LiteralPath $srcDist)) { throw "dist/index.js not found under $root" }
+
+  # Official host installer first (best-effort)
+  $mimoCmd = Get-Command mimo -ErrorAction SilentlyContinue
+  $mimo = if ($mimoCmd) { $mimoCmd.Source } else { 'C:\Users\wsks\.mimocode\bin\mimo.exe' }
+  if (Test-Path -LiteralPath $mimo) {
+    Write-Host "Trying: mimo plugin file:$root"
+    & $mimo plugin ("file:" + $root) 2>&1 | ForEach-Object { Write-Host $_ }
+  }
+
   New-Item -ItemType Directory -Path $p.CacheRoot -Force | Out-Null
   New-Item -ItemType Directory -Path (Join-Path $p.CacheRoot 'dist') -Force | Out-Null
   New-Item -ItemType Directory -Path (Join-Path $p.CacheRoot "$pkgName\dist") -Force | Out-Null
@@ -71,11 +80,28 @@ function Install-Plugin {
     }
   }
   $list = @()
-  if ($cfg -and $cfg.plugin) { $list = @($cfg.plugin) }
-  $names = @($list | ForEach-Object { if ($_ -is [System.Array]) { $_[0] } else { $_ } })
-  if ($names -notcontains $pkgName) { $list += $pkgName }
-  $map['plugin'] = @($list)
-  Write-Json $p.ConfigFile ([pscustomobject]$map)
+  if ($cfg -and $cfg.plugin) {
+    foreach ($item in @($cfg.plugin)) {
+      $n = if ($item -is [System.Array]) { $item[0] } else { $item }
+      if ($n -is [string] -and $n -match 'file:|\\\\|/') { continue }
+      if ($n) { $list += $n }
+    }
+  }
+  if ($list -notcontains $pkgName) { $list += $pkgName }
+  $map['plugin'] = @($list | Select-Object -Unique)
+  foreach ($cfgPath in @($p.ConfigFile, (Join-Path $p.Home '.mimocode\mimocode.json'))) {
+    $sub = Read-Jsonc $cfgPath
+    $m2 = [ordered]@{}
+    $m2['$schema'] = 'https://mimo.xiaomi.com/mimocode/config.json'
+    if ($sub) {
+      foreach ($prop in $sub.PSObject.Properties) {
+        if ($prop.Name -in @('plugin', '$schema')) { continue }
+        $m2[$prop.Name] = $prop.Value
+      }
+    }
+    $m2['plugin'] = $map['plugin']
+    Write-Json $cfgPath ([pscustomobject]$m2)
+  }
 
   if (-not (Test-Path -LiteralPath $p.SmFile)) {
     $sample = [ordered]@{
@@ -85,16 +111,13 @@ function Install-Plugin {
     Write-Json $p.SmFile ([pscustomobject]$sample)
   }
 
-  Write-Host 'mimocode-supermemory installed (MiMoCode plugin[] channel)'
-  Write-Host "  package : $($p.CacheRoot)"
-  Write-Host "  config  : $($p.ConfigFile)  -> plugin: [`"$pkgName`"]"
-  Write-Host "  memory  : $($p.SmFile)"
-  Write-Host ''
-  Write-Host 'Next:'
-  Write-Host '  1. powershell -File install.ps1 -Login   (browser OAuth)'
-  Write-Host '     or set SUPERMEMORY_API_KEY'
-  Write-Host '  2. Restart MiMoCode / new Desktop session'
-  Write-Host '  3. powershell -File install.ps1 -Status'
+  Write-Host 'mimocode-supermemory installed'
+  Write-Host "  mimo plugin : attempted file:$root"
+  Write-Host "  cache       : $($p.CacheRoot)"
+  Write-Host "  config      : plugin => `"$pkgName`" (stable name + cache)"
+  Write-Host "  memory      : $($p.SmFile)"
+  Write-Host 'Note: file: entries may fail at runtime on 0.1.14; package-name path is verified.'
+  Write-Host '      github:user/repo requires git in PATH.'
 }
 
 function Invoke-Login {
