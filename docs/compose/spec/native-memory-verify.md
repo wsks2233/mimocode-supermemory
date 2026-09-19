@@ -61,7 +61,24 @@ commits:
 - [x] T2: VM cache 插件已更新（含 session.post） (covers: S2)
 - [x] T3: 会话 A 原生写入，提示词无 supermemory/记忆字样 (covers: S2)
 - [x] T4: API search `amber-bridge` 命中自动 capture 的会话内容 (covers: S2)
-- [ ] T5: 会话 B 模型口述召回 — 无头 `mimo run` EUNKNOWN（宿主 git，PRE-EXISTING）；建议 Desktop/TUI 补测 (covers: S2)
+- [x] T5: 会话 B 模型口述召回 — **PASS**（VM TUI 截图）：`The internal code name for this workspace is "amber-bridge".` 前提：工作区为 `mimocode-supermemory-test` + `projectContainerTag` 已固定 (covers: S2)
+
+## Final verification (2026-09-19)
+
+| 项 | 结果 |
+|----|------|
+| 非指令会话 A 陈述事实 | PASS（无 supermemory/记忆字样） |
+| lifecycle `session.post` 自动上传 | PASS（API 检索到会话全文） |
+| 新会话口述召回 amber-bridge | **PASS**（VM MC TUI 截图） |
+| containerTag 读写一致 | PASS（`projectContainerTag` pin） |
+
+失败样本根因：开错目录（新建文件夹）或 tag=`repo________local` + 误用宿主 `memory` 工具。
+
+### 会话 B 失败根因（2026-09-19）
+
+1. 检索 container 为 `repo________local`（cwd 名解析为空），与写入侧 `repo_mimocode-supermemory-test__local` 不一致  
+2. 走的是 MiMo 内置 `memory` 工具，不是本插件 `supermemory`  
+3. 修复：`supermemory.jsonc` → `projectContainerTag: repo_mimocode-supermemory-test__local`；`containerTag()` 优先读该字段，空目录名回退 path hash
 
 ## Report
 
