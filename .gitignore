@@ -1,5 +1,4 @@
 node_modules/
-dist/
 .env
 .env.local
 *.log
@@ -9,3 +8,6 @@ Thumbs.db
 .vscode/
 *.tsbuildinfo
 .worktrees/
+.git-commit-local.ps1
+.worktrees-setup.ps1
+
