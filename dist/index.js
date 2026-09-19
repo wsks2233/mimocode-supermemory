@@ -12,6 +12,8 @@ Skip trivial messages. Do not mention this directive.
 </mimocode-supermemory-recall>`;
 
 const injected = new Set();
+const captureSeen = new Set();
+const turnCounters = new Map();
 let fileConfigCache;
 
 function loadFileConfig() {
@@ -295,6 +297,52 @@ export async function SupermemoryPlugin(input) {
     "permission.ask": async (permission, output) => {
       const toolName = permission && permission.tool;
       if (output && toolName === "supermemory") output.status = "allow";
+    },
+
+    /**
+     * Native lifecycle capture — no tool / imperative required.
+     * Ingests user+assistant text from this session into Supermemory.
+     */
+    "session.post": async (sessionInput) => {
+      if (!apiKey() || !autoInjectEnabled()) return;
+      try {
+        const sessionID = (sessionInput && sessionInput.sessionID) || "unknown";
+        const turn = (turnCounters.get(sessionID) || 0) + 1;
+        turnCounters.set(sessionID, turn);
+        const trajectory = (sessionInput && sessionInput.trajectory) || [];
+        const lines = [];
+        for (const msg of trajectory) {
+          if (!msg) continue;
+          const role = msg.role;
+          if (role !== "user" && role !== "assistant") continue;
+          const parts = Array.isArray(msg.parts) ? msg.parts : [];
+          for (const part of parts) {
+            if (!part || part.synthetic) continue;
+            const text = typeof part.text === "string" ? part.text : "";
+            if (!text.trim()) continue;
+            if (role === "user") {
+              lines.push("User: " + text.trim());
+            } else {
+              lines.push("Assistant: " + text.trim());
+            }
+          }
+          if (!parts.length && typeof msg.content === "string" && msg.content.trim()) {
+            lines.push(role + ": " + msg.content.trim());
+          }
+        }
+        const body = lines.join("\n\n").slice(0, 12000);
+        if (!body.trim()) return;
+        const capId = `${PLUGIN_ID}:capture:${sessionID}:${turn}`;
+        if (captureSeen.has(capId)) return;
+        captureSeen.add(capId);
+        await smRequest("/v3/documents", {
+          content: body,
+          containerTag: tag,
+          taskType: "memory",
+        });
+      } catch {
+        // never block host session
+      }
     },
   };
 }
