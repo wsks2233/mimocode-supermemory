@@ -90,10 +90,31 @@ function autoInjectEnabled() {
   return true;
 }
 
+function safeName(raw) {
+  const name = String(raw || "")
+    .split(/[\\/]/)
+    .filter(Boolean)
+    .pop();
+  const cleaned = (name || "").replace(/[^a-zA-Z0-9_-]/g, "_");
+  if (!cleaned || /^_+$/.test(cleaned)) return "";
+  return cleaned;
+}
+
 function containerTag(directory) {
-  const raw = directory || process.cwd() || "project";
-  const name = String(raw).split(/[\\/]/).filter(Boolean).pop() || "project";
-  return `repo_${name.replace(/[^a-zA-Z0-9_-]/g, "_")}__local`;
+  const file = loadFileConfig();
+  if (file.projectContainerTag && String(file.projectContainerTag).trim()) {
+    return String(file.projectContainerTag).trim();
+  }
+  const raw = directory || process.cwd() || "";
+  const name = safeName(raw);
+  if (name) return `repo_${name}__local`;
+  // Fallback: stable tag from full path so write/read never collide on empty names.
+  const path = String(raw || "project");
+  let h = 0;
+  for (let i = 0; i < path.length; i++) {
+    h = (Math.imul(31, h) + path.charCodeAt(i)) | 0;
+  }
+  return `repo_path_${Math.abs(h).toString(16)}__local`;
 }
 
 async function smRequest(path, body, method = "POST") {
