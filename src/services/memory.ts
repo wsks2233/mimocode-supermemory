@@ -78,6 +78,8 @@ export function createSupermemoryClient(config: PluginRuntimeConfig): Supermemor
     async search(query, containerTag, opts = {}) {
       if (!api.search) return [];
       const response = await api.search(query, {
+        // Supermemory /v4/search body field is `q` (not `query`).
+        q: query,
         containerTag,
         searchMode: "hybrid",
         limit: opts.limit ?? 8,

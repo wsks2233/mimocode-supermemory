@@ -6,6 +6,8 @@ import { captureTrajectory } from "./services/capture.js";
 import { createSupermemoryTool } from "./tool.js";
 import { getProjectTags } from "./tags.js";
 
+export const PLUGIN_ID = "mimocode-supermemory";
+
 export const SupermemoryPlugin: Plugin = async (input: PluginInput, options = {}) => {
   const config = loadRuntimeConfig(
     process.env as Record<string, string | undefined>,
@@ -117,4 +119,8 @@ export const SupermemoryPlugin: Plugin = async (input: PluginInput, options = {}
 };
 
 export { DEFAULT_RECALL_DIRECTIVE };
-export default SupermemoryPlugin;
+/** Canonical shipping artifact is dist/index.js (PluginModule). Align src before any rebuild. */
+export default {
+  id: PLUGIN_ID,
+  server: SupermemoryPlugin,
+};

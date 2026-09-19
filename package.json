@@ -1,49 +1,37 @@
 {
   "name": "mimocode-supermemory",
-  "version": "0.1.0",
-  "description": "Native-style Supermemory plugin for MiMoCode and MiMo Desktop, adapted from opencode-supermemory.",
+  "version": "0.2.0",
+  "description": "Supermemory plugin for MiMoCode — OpenCode-style plugin[] install UX.",
   "license": "MIT",
   "type": "module",
-  "private": false,
-  "keywords": [
-    "mimocode",
-    "mimo-desktop",
-    "supermemory",
-    "agent-memory",
-    "opencode",
-    "plugin"
-  ],
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
-  },
   "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "bin": {
+    "mimocode-supermemory": "./bin/cli.js"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
   "files": [
+    "bin",
     "dist",
+    "install.ps1",
     "templates",
     "README.md",
     "LICENSE"
   ],
-  "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "clean": "rm -rf dist",
-    "prepare": "npm run build"
-  },
-  "engines": {
-    "node": ">=18"
-  },
+  "keywords": [
+    "mimocode",
+    "supermemory",
+    "plugin",
+    "opencode",
+    "installer"
+  ],
   "peerDependencies": {
-    "@mimo-ai/plugin": ">=0.1.0",
-    "@mimo-ai/sdk": "*"
+    "@mimo-ai/plugin": ">=0.1.0"
   },
-  "dependencies": {
-    "supermemory": "^4.0.0"
-  },
-  "devDependencies": {
-    "typescript": "^5.8.0"
+  "scripts": {
+    "verify-syntax": "node --check dist/index.js && node --check bin/cli.js",
+    "install:local": "node bin/cli.js install",
+    "status": "node bin/cli.js status"
   }
 }

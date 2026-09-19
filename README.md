@@ -8,59 +8,161 @@
 
 | 项 | 状态 |
 |----|------|
-| 项目骨架 / 类型契约 | 已就绪 |
-| Supermemory 读写与注入 | 实现中（见 `src/`） |
-| `permission.ask` 自动放行 | 受宿主限制：钩子已定义但尚未接线，先写向前兼容逻辑 |
-| Compaction | 使用 MiMo 宿主 `experimental.session.compacting`，**不**接管宿主 summarize 所有权 |
-| 双通道安装 | npm `plugin[]` + `.mimocode` 落盘模板 |
+| `plugin[]` 模块插件通道 | **已在 VM 验证可加载**（OpenCode 同路径） |
+| Supermemory tool + hooks 注入 | 宿主日志确认 tool 注册与 `[SUPERMEMORY]` 注入 |
+| 一键安装 `install.ps1` / `npx install` | 已实现，VM `status ready=YES` |
+| Browser OAuth `login` | **与官方同协议**（console connect + 本地 callback） |
+| file hooks（`.mimocode/hooks/*.ts`） | VM 上 loader 失败（宿主问题），不作为主路径 |
+| `permission.ask` 自动放行 | 向前兼容逻辑已写；宿主可能未接线 |
 
-## 架构（目标）
-
-```text
-MiMoCode / MiMo Desktop
-        │
-        ├─ plugin[] / .mimocode/hooks|tools   ← 本仓库
-        │         │
-        │         ├─ chat.message  首回合注入 + 每回合 recall 指令
-        │         ├─ event / session.*  会话 capture
-        │         ├─ tool.supermemory   add|search|profile|list|forget
-        │         └─ experimental.session.compacting  协同压缩（只追加 context）
-        │
-        └─ Supermemory Memory API
-              POST /v3/documents · /v4/search · /v4/profile
-              containerTag = repo_{name}__{hash(git origin)}
-```
-
-## 规范 API（集成契约）
-
-- 鉴权：`Authorization: Bearer $SUPERMEMORY_API_KEY`
-- 写入：`POST /v3/documents`
-- 召回：`POST /v4/search`（推荐 `searchMode: "hybrid"`）
-- 画像：`POST /v4/profile`
-- 隔离：JSON body 单数 `containerTag`（勿用复数）
-
-自托管：`npx supermemory local`，将 `baseUrl` / `SUPERMEMORY_API_URL` 指到 `http://localhost:6767`。
-
-## 安装（规划）
-
-### 通道 A — npm 插件（原生向）
-
-```jsonc
-// ~/.config/mimocode/mimocode.jsonc
-{
-  "plugin": ["mimocode-supermemory"]
-}
-```
-
-### 通道 B — 落盘到 `.mimocode`（保证可用）
+## OpenCode 路径（我们对齐的目标）
 
 ```text
-.mimocode/tools/supermemory.ts          ← 自定义 tool
-.mimocode/hooks/mimocode-supermemory.ts ← Hooks
+bunx opencode-supermemory install
+  → ~/.config/opencode/opencode.jsonc  { "plugin": ["opencode-supermemory"] }
+  → OpenCode 启动时加载 npm/模块插件（Plugin → Hooks）
+```
+
+MiMoCode 对应：
+
+```text
+配置 plugin: ["mimocode-supermemory"]
+  → 解析 %USERPROFILE%\.cache\mimocode\packages\mimocode-supermemory@latest\node_modules\...
+  → 导出 PluginModule { id, server: SupermemoryPlugin }
+```
+
+## 安装（对齐官方 opencode-supermemory）
+
+### 一条命令（有 Node / Bun / npx）
+
+```bash
+# 发布 npm 后
+npx mimocode-supermemory@latest install
+
+# 未发 npm，从 GitHub 安装
+npx github:wsks2233/mimocode-supermemory install
+```
+
+### Windows 一键（无 Node 也能装，测试 VM 即用）
+
+在**本仓库根目录**执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
+等价于官方 `bunx opencode-supermemory@latest install` 的效果：
+
+1. 把插件放到 MiMoCode 解析路径  
+   `%USERPROFILE%\.cache\mimocode\packages\mimocode-supermemory@latest\node_modules\`
+2. 合并写入 `%USERPROFILE%\.config\mimocode\mimocode.jsonc`  
+   → `"plugin": ["mimocode-supermemory"]`
+3. 生成记忆配置模板  
+   `%USERPROFILE%\.config\mimocode\supermemory.jsonc`
+
+### 常用命令
+
+```powershell
+# 检查是否就绪
+powershell -File install.ps1 -Status
+
+# 鉴权说明
+powershell -File install.ps1 -Login
+
+# 卸载
+powershell -File install.ps1 -Uninstall
+```
+
+有 Node 时也可用：
+
+```bash
+node bin/cli.js install
+node bin/cli.js status
+node bin/cli.js login
+node bin/cli.js uninstall
+```
+
+### 鉴权（对齐官方 Browser login）
+
+```bash
+# Node / npx（推荐，与 opencode-supermemory 同协议）
+npx mimocode-supermemory login
+# 或
+node bin/cli.js login
+```
+
+```powershell
+# Windows 零依赖：本地 HttpListener + 打开浏览器
+powershell -ExecutionPolicy Bypass -File install.ps1 -Login
+```
+
+流程与官方一致：
+
+```text
+打开 https://console.supermemory.ai/auth/connect?callback=http://127.0.0.1:…/callback&client=mimocode
+  → Supermemory 授权后回调 apikey=sm_…
+  → 写入 %USERPROFILE%\.supermemory-mimocode\credentials.json
+  → 同步写入 ~/.config/mimocode/supermemory.jsonc 的 apiKey
+```
+
+插件读取顺序：
+
+1. `SUPERMEMORY_API_KEY` 环境变量  
+2. `~/.config/mimocode/supermemory.jsonc` → `apiKey`  
+3. `~/.supermemory-mimocode/credentials.json`
+
+手动 API Key（官方也支持）：
+
+```powershell
+[Environment]::SetEnvironmentVariable("SUPERMEMORY_API_KEY", "sm_...", "User")
+```
+
+```powershell
+# 查看状态（不打印完整 Key）
+powershell -File install.ps1 -Status
+# 或
+node bin/cli.js status
+```
+
+### 重启 MiMoCode
+
+新终端 / 新 Desktop 会话后，日志应出现：
+
+```text
+service=plugin path=mimocode-supermemory loading plugin
+```
+
+会话中 `supermemory mode=help` 返回 JSON，且含 `"plugin":"mimocode-supermemory"`。
+
+### 通道 B — `.mimocode` 落盘（降级 / 工具可用）
+
+```text
+.mimocode/tools/supermemory.ts
+.mimocode/hooks/mimocode-supermemory.ts   # 注意：MiMoCode 0.1.14 Windows 可能加载失败
 .mimocode/skills/mimocode-supermemory/SKILL.md
 ```
 
 模板见 [`templates/`](./templates)。
+
+## 架构
+
+```text
+MiMoCode
+  plugin: ["mimocode-supermemory"]
+        │
+        ▼
+  PluginModule { id, server }
+        │
+        ├─ tool.supermemory  add|search|profile|list|help
+        ├─ chat.message      [SUPERMEMORY] + recall（synthetic parts）
+        ├─ system.transform  系统提示注入
+        └─ compacting        context.push only
+        │
+        ▼
+  Supermemory HTTP API
+    POST /v3/documents · /v4/search (field q) · /v4/profile
+    containerTag = repo_{dir}__local
+```
 
 ### 环境变量
 

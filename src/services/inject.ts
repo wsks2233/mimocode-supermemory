@@ -20,10 +20,18 @@ export async function injectChatMessage(args: {
   config: PluginRuntimeConfig;
   tags: ProjectTags;
   sessionID: string;
+  messageID?: string;
   parts: PartLike[];
   injectedSessions: Set<string>;
 }): Promise<void> {
-  const { config, tags, sessionID, parts, injectedSessions } = args;
+  const { config, tags, sessionID, injectedSessions } = args;
+  const parts = args.parts as Array<Record<string, unknown>>;
+  const messageID =
+    typeof (args as { messageID?: string }).messageID === "string" &&
+    (args as { messageID?: string }).messageID!.startsWith("msg")
+      ? (args as { messageID?: string }).messageID!
+      : `msg_${sessionID.replace(/^ses_/, "")}`;
+  const basePart = { type: "text", synthetic: true, sessionID, messageID };
   if (!config.autoInject || !config.apiKey) return;
 
   const client = createSupermemoryClient(config);
@@ -50,10 +58,9 @@ export async function injectChatMessage(args: {
     );
     if (block) {
       parts.unshift({
+        ...basePart,
         id: `prt_${PLUGIN_PREFIX}-context-${Date.now()}`,
-        type: "text",
         text: block,
-        synthetic: true,
       });
     }
   } else if (isFirst) {
@@ -61,9 +68,8 @@ export async function injectChatMessage(args: {
   }
 
   parts.push({
+    ...basePart,
     id: `prt_${PLUGIN_PREFIX}-recall-${Date.now()}`,
-    type: "text",
     text: DEFAULT_RECALL_DIRECTIVE,
-    synthetic: true,
   });
 }

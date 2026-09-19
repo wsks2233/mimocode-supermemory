@@ -1,7 +1,11 @@
 # Compose Spec
 
-Feature documents live here when compose-next is engaged:
+| Feature | Doc |
+|---------|-----|
+| plugin-module | [plugin-module.md](./plugin-module.md) |
+| elegant-install | [elegant-install.md](./elegant-install.md) |
 
-`docs/compose/spec/<feature-name>.md`
+**Canonical runtime artifact**: `dist/index.js` (PluginModule `{ id, server }`).
+**Canonical installer**: `install.ps1` (Windows) + `bin/cli.js` (npx/Node).
 
-Status: research complete (`research/mimocode-native-plugins/REPORT.md`); implementation spec not yet authored.
+Do not overwrite `dist/` from `src/` until src is fully aligned.
