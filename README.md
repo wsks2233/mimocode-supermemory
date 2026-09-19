@@ -33,23 +33,49 @@ MiMoCode 对应：
 
 ## 安装（对齐官方 opencode-supermemory）
 
-### 一条命令（有 Node / Bun / npx）
+### 推荐：`mimo plugin`（官方宿主命令）
 
-```bash
+```powershell
+# 本地包目录（VM 实测可用）
+mimo plugin file:C:\path\to\mimocode-supermemory-pkg
+# 或绝对路径
+mimo plugin C:\path\to\mimocode-supermemory-pkg
 # 发布 npm 后
-npx mimocode-supermemory@latest install
-
-# 未发 npm，从 GitHub 安装
-npx github:wsks2233/mimocode-supermemory install
+mimo plugin mimocode-supermemory
+mimo plugin mimocode-supermemory -g
 ```
 
-### Windows 一键（无 Node 也能装，测试 VM 即用）
+**实测（MiMoCode 0.1.14）**：
 
-在**本仓库根目录**执行：
+- `mimo plugin file:...` / 绝对路径 → **安装成功**，写入 `~\.mimocode\mimocode.json` 的 `plugin[]`
+- 但运行时对 `file:` 解析可能失败；**稳定加载**依赖包名条目 `"mimocode-supermemory"` + cache  
+  `%USERPROFILE%\.cache\mimocode\packages\mimocode-supermemory@latest\node_modules\`
+- `github:user/repo` → 需要 **PATH 中有 git**（无 git 会报 `No git binary found`）
+
+### 一键安装（Windows，无 Node）
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File install.ps1
+powershell -ExecutionPolicy Bypass -File install.ps1 -Status
 ```
+
+脚本会：**优先尝试 `mimo plugin file:<包目录>`**，并**始终**执行已验证的 cache 落盘 + 写入 `"plugin": ["mimocode-supermemory"]`。
+
+### 一条命令（有 Node / npx）
+
+```bash
+npx github:wsks2233/mimocode-supermemory install
+# 或仓库内
+node bin/cli.js install
+```
+
+### 鉴权
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1 -Login
+```
+
+（console browser OAuth，与官方同协议。）
 
 等价于官方 `bunx opencode-supermemory@latest install` 的效果：
 
