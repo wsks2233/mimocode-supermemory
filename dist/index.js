@@ -4,6 +4,16 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 
+// Prefer IPv4 for Supermemory API (some Windows VMs stall on IPv6).
+try {
+  const dns = await import("node:dns");
+  if (typeof dns.setDefaultResultOrder === "function") {
+    dns.setDefaultResultOrder("ipv4first");
+  }
+} catch {
+  /* ignore */
+}
+
 const PLUGIN_ID = "mimocode-supermemory";
 
 const RECALL_DIRECTIVE = `<mimocode-supermemory-recall>
