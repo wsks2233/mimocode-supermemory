@@ -1,13 +1,5 @@
 node_modules/
-.env
-.env.local
-*.log
-.DS_Store
-Thumbs.db
-.idea/
-.vscode/
-*.tsbuildinfo
-.worktrees/
-.git-commit-local.ps1
-.worktrees-setup.ps1
-
+dist/index.built.js
+dist/index.js.pre-npm-backup
+*.tgz
+.npmrc

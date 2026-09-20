@@ -8,12 +8,13 @@
 
 | 项 | 状态 |
 |----|------|
-| `plugin[]` 模块插件通道 | **已在 VM 验证可加载**（OpenCode 同路径） |
-| Supermemory tool + hooks 注入 | 宿主日志确认 tool 注册与 `[SUPERMEMORY]` 注入 |
-| 一键安装 `install.ps1` / `npx install` | 已实现，VM `status ready=YES` |
-| Browser OAuth `login` | **与官方同协议**（console connect + 本地 callback） |
-| file hooks（`.mimocode/hooks/*.ts`） | VM 上 loader 失败（宿主问题），不作为主路径 |
-| `permission.ask` 自动放行 | 向前兼容逻辑已写；宿主可能未接线 |
+| `plugin[]` 模块插件通道 | **已在 VM 验证可加载** |
+| Supermemory tool + hooks 注入 | tool / inject / keyword / capture 已验收 |
+| 一键安装 `install.ps1` / `node bin/cli.js` | VM `status ready=YES`；slash commands/skills 已装 |
+| Browser OAuth `login` | 与官方同协议 |
+| npm 包 `mimocode-supermemory` | **源码已对齐 src→build→dist**；`npm pack` 0.3.0 就绪，**待 publish** |
+| `mimo plugin mimocode-supermemory` | 发布后验收（cache 路径与现网一致） |
+| file hooks（`.mimocode/hooks/*.ts`） | VM loader 失败（宿主），不作为主路径 |
 
 ## OpenCode 路径（我们对齐的目标）
 
@@ -64,9 +65,21 @@ powershell -ExecutionPolicy Bypass -File install.ps1 -Status
 ### 一条命令（有 Node / npx）
 
 ```bash
-npx github:wsks2233/mimocode-supermemory install
-# 或仓库内
+# 发布 npm 后（推荐，对齐官方）
+npx mimocode-supermemory install
+mimo plugin mimocode-supermemory
+# 仓库内
 node bin/cli.js install
+```
+
+### 开发（src → dist）
+
+```bash
+npm install
+npm run typecheck
+npm run build
+npm run test:contract
+npm run prepublishOnly
 ```
 
 ### 鉴权

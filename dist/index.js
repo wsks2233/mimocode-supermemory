@@ -1,35 +1,151 @@
-/**
- * Supermemory plugin for MiMoCode via plugin[] module channel.
- * No npm supermemory dependency — HTTP API via fetch.
- */
-import { existsSync, readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+// src/plugin.ts
+import { appendFileSync as appendFileSync2, existsSync as existsSync3, mkdirSync as mkdirSync2 } from "node:fs";
 
-// Prefer IPv4 for Supermemory API (some Windows VMs stall on IPv6).
-try {
-  const dns = await import("node:dns");
-  if (typeof dns.setDefaultResultOrder === "function") {
-    dns.setDefaultResultOrder("ipv4first");
+// src/config.ts
+import { existsSync, readFileSync } from "node:fs";
+var fileConfigCache;
+function loadFileConfig() {
+  if (fileConfigCache !== void 0) return fileConfigCache;
+  let next = {};
+  try {
+    const home = process.env.USERPROFILE || process.env.HOME || "";
+    const candidates = [
+      `${home}/.config/mimocode/supermemory.jsonc`,
+      `${home}\\.config\\mimocode\\supermemory.jsonc`
+    ];
+    for (const path of candidates) {
+      if (existsSync(path)) {
+        const raw = readFileSync(path, "utf8");
+        const stripped = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+        const parsed = JSON.parse(stripped);
+        next = parsed || {};
+        break;
+      }
+    }
+  } catch {
+    next = {};
   }
-} catch {
-  /* ignore */
+  fileConfigCache = next;
+  return next;
+}
+function loadCredentialsFile() {
+  try {
+    const home = process.env.USERPROFILE || process.env.HOME || "";
+    const candidates = [
+      `${home}/.supermemory-mimocode/credentials.json`,
+      `${home}\\.supermemory-mimocode\\credentials.json`
+    ];
+    for (const path of candidates) {
+      if (existsSync(path)) {
+        return JSON.parse(readFileSync(path, "utf8")) || {};
+      }
+    }
+  } catch {
+  }
+  return {};
+}
+function apiKey() {
+  if (process.env.SUPERMEMORY_API_KEY) return process.env.SUPERMEMORY_API_KEY;
+  const file = loadFileConfig();
+  if (file.apiKey) return file.apiKey;
+  return loadCredentialsFile().apiKey || "";
+}
+function baseUrl() {
+  return process.env.SUPERMEMORY_API_URL || process.env.SUPERMEMORY_BASE_URL || loadFileConfig().baseUrl || loadCredentialsFile().apiBaseUrl || "https://api.supermemory.ai";
+}
+function autoInjectEnabled() {
+  const file = loadFileConfig();
+  if (typeof file.autoInject === "boolean") return file.autoInject;
+  return true;
+}
+function keywordPatternStrings() {
+  const file = loadFileConfig();
+  const extra = Array.isArray(file.keywordPatterns) ? file.keywordPatterns : [];
+  return extra.filter((p) => typeof p === "string");
 }
 
-const PLUGIN_ID = "mimocode-supermemory";
+// src/api.ts
+async function smRequest(path, body, method = "POST") {
+  const key = apiKey();
+  if (!key) {
+    const err = new Error("SUPERMEMORY_API_KEY is not set");
+    err.code = "NO_KEY";
+    throw err;
+  }
+  const res = await fetch(baseUrl() + path, {
+    method,
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json"
+    },
+    body: body === void 0 ? void 0 : JSON.stringify(body)
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    const err = new Error(
+      `Supermemory ${path} ${res.status}: ${text.slice(0, 300)}`
+    );
+    err.status = res.status;
+    err.body = text;
+    throw err;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { raw: text };
+  }
+}
+function extractHits(payload) {
+  const results = payload && typeof payload === "object" && "results" in payload ? payload.results ?? [] : [];
+  const out = [];
+  for (const item of results.slice(0, 8)) {
+    const memory = item.memory;
+    const mem = memory && memory.text;
+    const chunkRaw = item.chunk;
+    const chunk = typeof chunkRaw === "string" ? chunkRaw : chunkRaw?.content ?? "";
+    const text = mem || chunk || item.text || "";
+    if (text && String(text).trim()) {
+      const meta = item.metadata || memory && memory.metadata || {};
+      const docs = item.documents || [];
+      const docId = docs[0] && docs[0].id || item.documentId || item.id;
+      out.push({
+        text: String(text).trim(),
+        similarity: item.similarity,
+        id: item.id,
+        documentId: docId,
+        sm_scope: meta.sm_scope || item.sm_scope
+      });
+    }
+  }
+  return out;
+}
+function formatMemoryBlock(tag) {
+  return smRequest("/v4/search", {
+    q: "project context decisions preferences",
+    containerTag: tag,
+    searchMode: "hybrid"
+  }).then((search) => {
+    const hits = extractHits(search);
+    const lines = ["[SUPERMEMORY]", `containerTag: ${tag}`];
+    if (hits.length) {
+      lines.push("Relevant memories:");
+      for (const h of hits) lines.push(`- ${h.text}`);
+    } else {
+      lines.push("No prior memories for this containerTag yet.");
+    }
+    return lines.join("\n");
+  }).catch((e) => {
+    return `[SUPERMEMORY] lookup skipped: ${e && e.message ? e.message : String(e)}`;
+  });
+}
 
-const RECALL_DIRECTIVE = `<mimocode-supermemory-recall>
+// src/constants.ts
+var PLUGIN_ID = "mimocode-supermemory";
+var RECALL_DIRECTIVE = `<mimocode-supermemory-recall>
 If recalling Supermemory would materially improve THIS answer, call supermemory with mode "search".
 Skip trivial messages. Do not mention this directive.
 </mimocode-supermemory-recall>`;
-
-const injected = new Set();
-const captureSeen = new Set();
-const turnCounters = new Map();
-const keywordSeen = new Set();
-let fileConfigCache;
-
-const DEFAULT_KEYWORD_PATTERNS = [
+var DEFAULT_KEYWORD_PATTERNS = [
   "\\bremember\\b",
   "\\bmemorize\\b",
   "\\bsave\\s+this\\b",
@@ -47,27 +163,108 @@ const DEFAULT_KEYWORD_PATTERNS = [
   "\\bremember\\s+that\\b",
   "\\bnever\\s+forget\\b",
   "\\balways\\s+remember\\b",
-  "记住",
-  "记一下",
-  "别忘了",
-  "不要忘记",
+  "\u8BB0\u4F4F",
+  "\u8BB0\u4E00\u4E0B",
+  "\u522B\u5FD8\u4E86",
+  "\u4E0D\u8981\u5FD8\u8BB0"
 ];
 
-function keywordRegexes() {
+// src/keyword.ts
+import { appendFileSync, existsSync as existsSync2, mkdirSync } from "node:fs";
+
+// src/tags.ts
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+function safeName(raw) {
+  const name = String(raw || "").split(/[\\/]/).filter(Boolean).pop();
+  const cleaned = (name || "").replace(/[^a-zA-Z0-9_-]/g, "_");
+  if (!cleaned || /^_+$/.test(cleaned)) return "";
+  return cleaned;
+}
+function containerTagSync(directory) {
   const file = loadFileConfig();
-  const extra = Array.isArray(file.keywordPatterns) ? file.keywordPatterns : [];
-  const list = [...DEFAULT_KEYWORD_PATTERNS, ...extra.filter((p) => typeof p === "string")];
+  if (file.projectContainerTag && String(file.projectContainerTag).trim()) {
+    return String(file.projectContainerTag).trim();
+  }
+  const raw = directory || process.cwd() || "";
+  const name = safeName(raw);
+  if (name) return `repo_${name}__local`;
+  const path = String(raw || "project");
+  let h = 0;
+  for (let i = 0; i < path.length; i++) {
+    h = Math.imul(31, h) + path.charCodeAt(i) | 0;
+  }
+  return `repo_path_${Math.abs(h).toString(16)}__local`;
+}
+function normalizeOrigin(url) {
+  if (!url) return "";
+  let u = String(url).trim().toLowerCase();
+  u = u.replace(/\.git$/, "").replace(/\/$/, "");
+  u = u.replace(/^git@([^:]+):/, "$1/");
+  u = u.replace(/^ssh:\/\//, "").replace(/^https?:\/\//, "");
+  return u;
+}
+function sha12(input) {
+  return createHash("sha256").update(String(input)).digest("hex").slice(0, 12);
+}
+function gitExec(directory, args) {
+  try {
+    return String(
+      execFileSync("git", ["-C", String(directory || process.cwd()), ...args], {
+        encoding: "utf8",
+        timeout: 4e3,
+        stdio: ["ignore", "pipe", "ignore"]
+      }) || ""
+    ).trim();
+  } catch {
+    return "";
+  }
+}
+async function resolveContainerTag(directory) {
+  const file = loadFileConfig();
+  const dir = directory || process.cwd();
+  const pinned = file.projectContainerTag && String(file.projectContainerTag).trim();
+  if (pinned) {
+    return {
+      canonical: pinned,
+      source: "config:projectContainerTag",
+      origin: null,
+      projectName: safeName(dir) || "project"
+    };
+  }
+  const root = gitExec(dir, ["rev-parse", "--show-toplevel"]) || dir;
+  const originRaw = gitExec(dir, ["remote", "get-url", "origin"]);
+  const name = safeName(root) || safeName(dir) || "project";
+  if (originRaw) {
+    const origin = normalizeOrigin(originRaw);
+    return {
+      canonical: `repo_${name}__${sha12(origin)}`,
+      source: "git-origin",
+      origin,
+      projectName: name
+    };
+  }
+  return {
+    canonical: containerTagSync(dir),
+    source: "basename-or-path",
+    origin: null,
+    projectName: name
+  };
+}
+
+// src/keyword.ts
+var keywordSeen = /* @__PURE__ */ new Set();
+function keywordRegexes() {
+  const list = [...DEFAULT_KEYWORD_PATTERNS, ...keywordPatternStrings()];
   const out = [];
   for (const p of list) {
     try {
       out.push(new RegExp(p, "i"));
     } catch {
-      /* ignore invalid */
     }
   }
   return out;
 }
-
 function matchKeyword(text) {
   const t = String(text || "");
   if (!t.trim()) return null;
@@ -76,20 +273,17 @@ function matchKeyword(text) {
   }
   return null;
 }
-
 function extractRememberContent(text) {
   const t = String(text || "").trim();
   if (!t) return "";
-  const m =
-    t.match(/(?:remember|memorize|记住|记一下|别忘了|不要忘记)\s*(?:that|:|：|\s)\s*([\s\S]+)/i) ||
-    t.match(/(?:don'?t forget|do not forget|never forget)\s*(?:that|:|：)?\s*([\s\S]+)/i) ||
-    t.match(/(?:save|store|record|learn|note)\s+this\s*(?::|：)?\s*([\s\S]+)/i);
+  const m = t.match(
+    /(?:remember|memorize|记住|记一下|别忘了|不要忘记)\s*(?:that|:|：|\s)\s*([\s\S]+)/i
+  ) || t.match(/(?:don'?t forget|do not forget|never forget)\s*(?:that|:|：)?\s*([\s\S]+)/i) || t.match(/(?:save|store|record|learn|note)\s+this\s*(?::|：)?\s*([\s\S]+)/i);
   if (m && m[1] && m[1].trim()) return m[1].trim();
   return t;
 }
-
 async function keywordCapture(userText, tagInfo) {
-  if (!apiKey() || !autoOn()) return;
+  if (!apiKey() || !autoInjectEnabled()) return;
   if (!matchKeyword(userText)) return;
   const content = extractRememberContent(userText);
   if (!content) return;
@@ -103,23 +297,22 @@ async function keywordCapture(userText, tagInfo) {
       taskType: "memory",
       sm_capture_mode: "keyword",
       sm_scope: "project",
-      project: tagInfo.projectName,
+      project: tagInfo.projectName
     });
     try {
-      const fsP = await import("node:fs");
       const home = process.env.USERPROFILE || process.env.HOME || "";
       const pdir = `${home}\\sm-hook-proof`;
-      if (!fsP.existsSync(pdir)) fsP.mkdirSync(pdir, { recursive: true });
-      fsP.appendFileSync(
+      if (!existsSync2(pdir)) mkdirSync(pdir, { recursive: true });
+      appendFileSync(
         `${pdir}\\keyword.log`,
-        `${new Date().toISOString()} tag=${tagInfo.canonical} content=${content.slice(0, 200)}\n`,
+        `${(/* @__PURE__ */ new Date()).toISOString()} tag=${tagInfo.canonical} content=${content.slice(0, 200)}
+`
       );
-    } catch {}
+    } catch {
+    }
   } catch {
-    /* never block */
   }
 }
-
 function userTextFromParts(parts) {
   const texts = [];
   for (const p of parts || []) {
@@ -129,274 +322,46 @@ function userTextFromParts(parts) {
   return texts.join("\n");
 }
 
-function loadFileConfig() {
-  if (fileConfigCache !== undefined) return fileConfigCache;
-  fileConfigCache = {};
-  try {
-    const home = process.env.USERPROFILE || process.env.HOME || "";
-    const candidates = [
-      `${home}/.config/mimocode/supermemory.jsonc`,
-      `${home}\\.config\\mimocode\\supermemory.jsonc`,
-    ];
-    for (const path of candidates) {
-      if (existsSync(path)) {
-        const raw = readFileSync(path, "utf8");
-        const stripped = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-        fileConfigCache = JSON.parse(stripped) || {};
-        break;
-      }
-    }
-  } catch {
-    fileConfigCache = {};
-  }
-  return fileConfigCache;
-}
-
-function loadCredentialsFile() {
-  try {
-    const home = process.env.USERPROFILE || process.env.HOME || "";
-    const candidates = [
-      `${home}/.supermemory-mimocode/credentials.json`,
-      `${home}\\.supermemory-mimocode\\credentials.json`,
-    ];
-    for (const path of candidates) {
-      if (existsSync(path)) {
-        return JSON.parse(readFileSync(path, "utf8")) || {};
-      }
-    }
-  } catch {
-    /* ignore */
-  }
-  return {};
-}
-
-function apiKey() {
-  if (process.env.SUPERMEMORY_API_KEY) return process.env.SUPERMEMORY_API_KEY;
-  const file = loadFileConfig();
-  if (file.apiKey) return file.apiKey;
-  return loadCredentialsFile().apiKey || "";
-}
-
-function baseUrl() {
-  return (
-    process.env.SUPERMEMORY_API_URL ||
-    process.env.SUPERMEMORY_BASE_URL ||
-    loadFileConfig().baseUrl ||
-    loadCredentialsFile().apiBaseUrl ||
-    "https://api.supermemory.ai"
-  );
-}
-
-function autoInjectEnabled() {
-  const file = loadFileConfig();
-  if (typeof file.autoInject === "boolean") return file.autoInject;
-  return true;
-}
-
-function safeName(raw) {
-  const name = String(raw || "")
-    .split(/[\\/]/)
-    .filter(Boolean)
-    .pop();
-  const cleaned = (name || "").replace(/[^a-zA-Z0-9_-]/g, "_");
-  if (!cleaned || /^_+$/.test(cleaned)) return "";
-  return cleaned;
-}
-
-function containerTagSync(directory) {
-  const file = loadFileConfig();
-  if (file.projectContainerTag && String(file.projectContainerTag).trim()) {
-    return String(file.projectContainerTag).trim();
-  }
-  const raw = directory || process.cwd() || "";
-  const name = safeName(raw);
-  if (name) return `repo_${name}__local`;
-  const path = String(raw || "project");
-  let h = 0;
-  for (let i = 0; i < path.length; i++) {
-    h = (Math.imul(31, h) + path.charCodeAt(i)) | 0;
-  }
-  return `repo_path_${Math.abs(h).toString(16)}__local`;
-}
-
-/** Official-style: repo_{name}__{hash(normalized git origin)} */
-function normalizeOrigin(url) {
-  if (!url) return "";
-  let u = String(url).trim().toLowerCase();
-  u = u.replace(/\.git$/, "").replace(/\/$/, "");
-  u = u.replace(/^git@([^:]+):/, "$1/");
-  u = u.replace(/^ssh:\/\//, "").replace(/^https?:\/\//, "");
-  return u;
-}
-
-function sha12(input) {
-  return createHash("sha256").update(String(input)).digest("hex").slice(0, 12);
-}
-
-function gitExec(directory, args) {
-  try {
-    return String(
-      execFileSync("git", ["-C", String(directory || process.cwd()), ...args], {
-        encoding: "utf8",
-        timeout: 4000,
-        stdio: ["ignore", "pipe", "ignore"],
-      }) || "",
-    ).trim();
-  } catch {
-    return "";
-  }
-}
-
-async function resolveContainerTag(directory) {
-  const file = loadFileConfig();
-  const dir = directory || process.cwd();
-  const pinned = file.projectContainerTag && String(file.projectContainerTag).trim();
-  if (pinned) {
-    return {
-      canonical: pinned,
-      source: "config:projectContainerTag",
-      origin: null,
-      projectName: safeName(dir) || "project",
-    };
-  }
-  const root = gitExec(dir, ["rev-parse", "--show-toplevel"]) || dir;
-  const originRaw = gitExec(dir, ["remote", "get-url", "origin"]);
-  const name = safeName(root) || safeName(dir) || "project";
-  if (originRaw) {
-    const origin = normalizeOrigin(originRaw);
-    return {
-      canonical: `repo_${name}__${sha12(origin)}`,
-      source: "git-origin",
-      origin,
-      projectName: name,
-    };
-  }
-  return {
-    canonical: containerTagSync(dir),
-    source: "basename-or-path",
-    origin: null,
-    projectName: name,
-  };
-}
-
-function containerTag(directory) {
-  return containerTagSync(directory);
-}
-
-async function smRequest(path, body, method = "POST") {
-  const key = apiKey();
-  if (!key) {
-    const err = new Error("SUPERMEMORY_API_KEY is not set");
-    err.code = "NO_KEY";
-    throw err;
-  }
-  const res = await fetch(baseUrl() + path, {
-    method,
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const text = await res.text();
-  if (!res.ok) {
-    const err = new Error(`Supermemory ${path} ${res.status}: ${text.slice(0, 300)}`);
-    err.status = res.status;
-    err.body = text;
-    throw err;
-  }
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { raw: text };
-  }
-}
-
-function extractHits(payload) {
-  const results = (payload && payload.results) || [];
-  const out = [];
-  for (const item of results.slice(0, 8)) {
-    const mem = item.memory && item.memory.text;
-    const chunk =
-      typeof item.chunk === "string"
-        ? item.chunk
-        : (item.chunk && item.chunk.content) || "";
-    const text = mem || chunk || item.text || "";
-    if (text && String(text).trim()) {
-      const meta = item.metadata || (item.memory && item.memory.metadata) || {};
-      const docs = item.documents || [];
-      const docId = (docs[0] && docs[0].id) || item.documentId || item.id;
-      out.push({
-        text: String(text).trim(),
-        similarity: item.similarity,
-        id: item.id,
-        documentId: docId,
-        sm_scope: meta.sm_scope || item.sm_scope,
-      });
-    }
-  }
-  return out;
-}
-
-function formatMemoryBlock(tag) {
-  return smRequest("/v4/search", {
-    q: "project context decisions preferences",
-    containerTag: tag,
-    searchMode: "hybrid",
-  })
-    .then((search) => {
-      const hits = extractHits(search);
-      const lines = ["[SUPERMEMORY]", `containerTag: ${tag}`];
-      if (hits.length) {
-        lines.push("Relevant memories:");
-        for (const h of hits) lines.push(`- ${h.text}`);
-      } else {
-        lines.push("No prior memories for this containerTag yet.");
-      }
-      return lines.join("\n");
-    })
-    .catch((e) => {
-      return `[SUPERMEMORY] lookup skipped: ${e && e.message ? e.message : String(e)}`;
-    });
-}
-
-async function executeSupermemory(args, directory, resolvedTag) {
-  const tagInfo = resolvedTag || (await resolveContainerTag(directory));
+// src/tool.ts
+async function executeSupermemory(args, tagInfo) {
   const tag = tagInfo.canonical;
-  const mode = (args && args.mode) || "help";
-  const scope = args && args.scope === "user" ? "personal" : "project";
-  const ok = (payload) =>
-    JSON.stringify({
-      plugin: PLUGIN_ID,
-      containerTag: tag,
-      tagSource: tagInfo.source,
-      origin: tagInfo.origin || undefined,
-      ...payload,
-    });
+  const mode = args.mode || "help";
+  const scope = args.scope === "user" ? "personal" : "project";
+  const ok = (payload) => JSON.stringify({
+    plugin: PLUGIN_ID,
+    containerTag: tag,
+    tagSource: tagInfo.source,
+    origin: tagInfo.origin || void 0,
+    ...payload
+  });
   try {
     if (mode === "search") {
-      const q = args && args.query;
+      const q = args.query;
       if (!q) return ok({ success: false, error: "query required" });
       const data = await smRequest("/v4/search", {
         q,
         containerTag: tag,
-        searchMode: "hybrid",
+        searchMode: "hybrid"
       });
       const results = extractHits(data);
       let filtered = results;
-      if (args && (args.scope === "user" || args.scope === "project")) {
+      if (args.scope === "user" || args.scope === "project") {
         const want = args.scope === "user" ? "personal" : "project";
         const scoped = results.filter((r) => !r.sm_scope || r.sm_scope === want);
         filtered = scoped.length ? scoped : results;
       }
-      return ok({ success: true, results: filtered, sm_scope: args?.scope ? scope : undefined });
+      return ok({
+        success: true,
+        results: filtered,
+        sm_scope: args.scope ? scope : void 0
+      });
     }
     if (mode === "profile") {
       const data = await smRequest("/v4/profile", { containerTag: tag });
       return ok({ success: true, profile: data });
     }
     if (mode === "add") {
-      const content = args && args.content;
+      const content = args.content;
       if (!content) return ok({ success: false, error: "content required" });
       const data = await smRequest("/v3/documents", {
         content,
@@ -404,18 +369,22 @@ async function executeSupermemory(args, directory, resolvedTag) {
         taskType: "memory",
         sm_scope: scope,
         sm_capture_mode: "tool",
-        project: tagInfo.projectName,
+        project: tagInfo.projectName
       });
       return ok({ success: true, document: data, sm_scope: scope });
     }
     if (mode === "list") {
       const data = await smRequest("/v3/documents/list", { containerTag: tag, limit: 20 });
-      return ok({ success: true, documents: data, sm_scope_filter: args?.scope || undefined });
+      return ok({
+        success: true,
+        documents: data,
+        sm_scope_filter: args.scope || void 0
+      });
     }
     if (mode === "forget") {
-      const id = args && args.id;
-      const content = args && args.content;
-      const q = args && args.query;
+      const id = args.id;
+      const content = args.content;
+      const q = args.query;
       if (!id && !content && !q) {
         return ok({ success: false, error: "forget requires id, content, or query" });
       }
@@ -434,11 +403,13 @@ async function executeSupermemory(args, directory, resolvedTag) {
       const tryDoc = async (docId) => {
         if (!docId) return false;
         try {
-          const data = await smRequest(`/v3/documents/${docId}`, undefined, "DELETE");
+          const data = await smRequest(`/v3/documents/${docId}`, void 0, "DELETE");
           deleted.push({ path: `/v3/documents/${docId}`, data });
           return true;
         } catch (e) {
-          errors.push(`/v3/documents/${docId}: ${e && e.message ? e.message : String(e)}`);
+          errors.push(
+            `/v3/documents/${docId}: ${e && e.message ? e.message : String(e)}`
+          );
           return false;
         }
       };
@@ -451,10 +422,10 @@ async function executeSupermemory(args, directory, resolvedTag) {
         const search = await smRequest("/v4/search", {
           q: searchText,
           containerTag: tag,
-          searchMode: "hybrid",
+          searchMode: "hybrid"
         });
-        const hits = extractHits(search).filter((h) =>
-          content ? h.text.includes(content) || h.text === content : true,
+        const hits = extractHits(search).filter(
+          (h) => content ? h.text.includes(content) || h.text === content : true
         );
         for (const hit of hits.slice(0, 8)) {
           await tryDoc(hit.documentId || hit.id);
@@ -463,106 +434,118 @@ async function executeSupermemory(args, directory, resolvedTag) {
           const data = await smRequest("/v4/memories/forget-matching", {
             containerTag: tag,
             query: searchText,
-            dryRun: false,
+            dryRun: false
           });
           deleted.push({ path: "/v4/memories/forget-matching", data });
         } catch (e) {
-          errors.push(`/v4/memories/forget-matching: ${e && e.message ? e.message : String(e)}`);
+          errors.push(
+            `/v4/memories/forget-matching: ${e && e.message ? e.message : String(e)}`
+          );
         }
       }
       return ok({
         success: deleted.length > 0,
         deleted,
         errors,
-        sm_scope: scope,
+        sm_scope: scope
       });
     }
     return ok({
       success: true,
       help: "modes: search | profile | add | list | forget | help; scope=user|project; forget uses id or content/query (deletes matching documents + memory APIs)",
-      baseUrl: baseUrl(),
+      baseUrl: baseUrl()
     });
   } catch (e) {
     return ok({ success: false, error: e && e.message ? e.message : String(e) });
   }
 }
-
-/**
- * @param {{ directory?: string, client?: unknown, project?: unknown, $?: unknown }} input
- * @returns {Promise<Record<string, unknown>>}
- */
-export async function SupermemoryPlugin(input) {
-  const directory = (input && input.directory) || process.cwd();
-  const tagInfo = await resolveContainerTag(directory);
-  const tag = tagInfo.canonical;
-  try {
-    const home = process.env.USERPROFILE || process.env.HOME || "";
-    const dir = `${home}\\sm-hook-proof`;
-    if (!existsSync(dir)) {
-      const { mkdirSync } = await import("node:fs");
-      mkdirSync(dir, { recursive: true });
-    }
-    const { appendFileSync } = await import("node:fs");
-    appendFileSync(
-      `${dir}\\tag.log`,
-      `${new Date().toISOString()} dir=${directory} tag=${tag} source=${tagInfo.source} origin=${tagInfo.origin || "-"}\n`,
-    );
-  } catch {
-    /* ignore */
-  }
-
-  const supermemoryTool = {
-    description:
-      "Supermemory long-term memory. Modes: search | profile | add | list | help.",
+function createSupermemoryTool(tagInfo, directory) {
+  return {
+    description: "Supermemory long-term memory. Modes: search | profile | add | list | help.",
     parameters: {
       type: "object",
       properties: {
         mode: {
           type: "string",
           enum: ["search", "profile", "add", "list", "forget", "help"],
-          description: "Operation",
+          description: "Operation"
         },
         query: { type: "string", description: "Search query or forget-matching query" },
-        content: { type: "string", description: "Content for add, or exact content to forget" },
+        content: {
+          type: "string",
+          description: "Content for add, or exact content to forget"
+        },
         id: { type: "string", description: "Memory/document id for mode=forget" },
         scope: {
           type: "string",
           enum: ["user", "project"],
-          description: "sm_scope metadata (default project)",
-        },
-      },
+          description: "sm_scope metadata (default project)"
+        }
+      }
     },
     async execute(args) {
-      return executeSupermemory(args || {}, directory, tagInfo);
-    },
+      void directory;
+      return executeSupermemory(args || {}, tagInfo);
+    }
   };
+}
 
+// src/plugin.ts
+var injected = /* @__PURE__ */ new Set();
+var captureSeen = /* @__PURE__ */ new Set();
+var turnCounters = /* @__PURE__ */ new Map();
+async function ensureIpv4() {
+  try {
+    const dns = await import("node:dns");
+    if (typeof dns.setDefaultResultOrder === "function") {
+      dns.setDefaultResultOrder("ipv4first");
+    }
+  } catch {
+  }
+}
+function writeProofTag(tagInfo, directory) {
+  try {
+    const home = process.env.USERPROFILE || process.env.HOME || "";
+    const dir = `${home}\\sm-hook-proof`;
+    if (!existsSync3(dir)) mkdirSync2(dir, { recursive: true });
+    appendFileSync2(
+      `${dir}\\tag.log`,
+      `${(/* @__PURE__ */ new Date()).toISOString()} dir=${directory} tag=${tagInfo.canonical} source=${tagInfo.source} origin=${tagInfo.origin || "-"}
+`
+    );
+  } catch {
+  }
+}
+async function SupermemoryPlugin(input) {
+  await ensureIpv4();
+  const directory = input && input.directory || process.cwd();
+  const tagInfo = await resolveContainerTag(directory);
+  const tag = tagInfo.canonical;
+  writeProofTag(tagInfo, directory);
+  const supermemoryTool = createSupermemoryTool(tagInfo, directory);
   return {
     tool: {
-      supermemory: supermemoryTool,
+      supermemory: supermemoryTool
     },
-
     "chat.message": async (msgInput, output) => {
       if (!apiKey() || !autoInjectEnabled()) return;
-      const parts = (output && output.parts) || [];
-      const sessionID = (msgInput && msgInput.sessionID) || "unknown";
+      const parts = output && output.parts || [];
+      const sessionID = msgInput && msgInput.sessionID || "unknown";
       try {
         const userText = userTextFromParts(parts);
         if (userText) await keywordCapture(userText, tagInfo);
-      } catch {}
-      const fromInput =
-        msgInput && typeof msgInput.messageID === "string" ? msgInput.messageID : "";
-      const fromParts =
-        parts.find(
-          (p) => p && typeof p.messageID === "string" && p.messageID.startsWith("msg"),
-        )?.messageID || "";
-      const messageID =
-        fromInput.startsWith("msg") ? fromInput : fromParts || `msg_${String(sessionID).replace(/^ses_/, "")}`;
+      } catch {
+      }
+      const fromInput = msgInput && typeof msgInput.messageID === "string" ? msgInput.messageID : "";
+      const fromParts = parts.find(
+        (p) => p && typeof p.messageID === "string" && String(p.messageID).startsWith("msg")
+      )?.messageID || "";
+      const messageID = fromInput.startsWith("msg") ? fromInput : fromParts || `msg_${String(sessionID).replace(/^ses_/, "")}`;
       const basePart = {
         type: "text",
         synthetic: true,
         sessionID,
-        messageID,
+        messageID
       };
       if (!injected.has(sessionID)) {
         injected.add(sessionID);
@@ -570,17 +553,16 @@ export async function SupermemoryPlugin(input) {
         parts.unshift({
           ...basePart,
           id: `prt_${PLUGIN_ID}-ctx-${Date.now()}`,
-          text: block,
+          text: block
         });
       }
       parts.push({
         ...basePart,
         id: `prt_${PLUGIN_ID}-recall-${Date.now()}`,
-        text: RECALL_DIRECTIVE,
+        text: RECALL_DIRECTIVE
       });
       if (output) output.parts = parts;
     },
-
     "experimental.chat.system.transform": async (_input, output) => {
       if (!apiKey() || !output || !autoInjectEnabled()) return;
       const block = await formatMemoryBlock(tag);
@@ -588,44 +570,35 @@ export async function SupermemoryPlugin(input) {
       output.system.push(block);
       output.system.push(RECALL_DIRECTIVE);
     },
-
     "experimental.session.compacting": async (_input, output) => {
       if (!apiKey() || !output) return;
       try {
         const search = await smRequest("/v4/search", {
           q: "project decisions constraints",
           containerTag: tag,
-          searchMode: "hybrid",
+          searchMode: "hybrid"
         });
         const hits = extractHits(search);
         if (hits.length) {
           if (!output.context) output.context = [];
           output.context.push(
-            "[COMPACTION CONTEXT INJECTION]\n" +
-              hits.map((h) => `- ${h.text}`).join("\n"),
+            "[COMPACTION CONTEXT INJECTION]\n" + hits.map((h) => `- ${h.text}`).join("\n")
           );
         }
       } catch {
-        // never block host compaction
       }
     },
-
     "permission.ask": async (permission, output) => {
       const toolName = permission && permission.tool;
       if (output && toolName === "supermemory") output.status = "allow";
     },
-
-    /**
-     * Native lifecycle capture — no tool / imperative required.
-     * Ingests user+assistant text from this session into Supermemory.
-     */
     "session.post": async (sessionInput) => {
       if (!apiKey() || !autoInjectEnabled()) return;
       try {
-        const sessionID = (sessionInput && sessionInput.sessionID) || "unknown";
+        const sessionID = sessionInput && sessionInput.sessionID || "unknown";
         const turn = (turnCounters.get(sessionID) || 0) + 1;
         turnCounters.set(sessionID, turn);
-        const trajectory = (sessionInput && sessionInput.trajectory) || [];
+        const trajectory = sessionInput && sessionInput.trajectory || [];
         const lines = [];
         for (const msg of trajectory) {
           if (!msg) continue;
@@ -646,7 +619,7 @@ export async function SupermemoryPlugin(input) {
             lines.push(role + ": " + msg.content.trim());
           }
         }
-        const body = lines.join("\n\n").slice(0, 12000);
+        const body = lines.join("\n\n").slice(0, 12e3);
         if (!body.trim()) return;
         const capId = `${PLUGIN_ID}:capture:${sessionID}:${turn}`;
         if (captureSeen.has(capId)) return;
@@ -657,16 +630,20 @@ export async function SupermemoryPlugin(input) {
           taskType: "memory",
           sm_scope: "project",
           sm_capture_mode: "automatic",
-          project: tagInfo.projectName,
+          project: tagInfo.projectName
         });
       } catch {
-        // never block host session
       }
-    },
+    }
   };
 }
-
-export default {
+var plugin_default = {
   id: PLUGIN_ID,
-  server: SupermemoryPlugin,
+  server: SupermemoryPlugin
+};
+export {
+  PLUGIN_ID,
+  SupermemoryPlugin,
+  plugin_default as default,
+  resolveContainerTag
 };

@@ -1,57 +1,84 @@
-import { DEFAULT_CONFIG } from "./constants.js";
-import type { PluginRuntimeConfig } from "./types.js";
+import { existsSync, readFileSync } from "node:fs";
 
-type Env = Record<string, string | undefined>;
+export type FileConfig = {
+  apiKey?: string;
+  baseUrl?: string;
+  autoInject?: boolean;
+  projectContainerTag?: string;
+  keywordPatterns?: string[];
+  [key: string]: unknown;
+};
 
-export function loadRuntimeConfig(
-  env: Env = process.env as Env,
-  options: Record<string, unknown> = {},
-): PluginRuntimeConfig {
-  const opt = options as Partial<PluginRuntimeConfig>;
-  const bool = (value: unknown, fallback: boolean): boolean => {
-    if (typeof value === "boolean") return value;
-    if (typeof value === "string") {
-      if (value === "0" || value === "false") return false;
-      if (value === "1" || value === "true") return true;
+let fileConfigCache: FileConfig | undefined;
+
+export function loadFileConfig(): FileConfig {
+  if (fileConfigCache !== undefined) return fileConfigCache;
+  let next: FileConfig = {};
+  try {
+    const home = process.env.USERPROFILE || process.env.HOME || "";
+    const candidates = [
+      `${home}/.config/mimocode/supermemory.jsonc`,
+      `${home}\\.config\\mimocode\\supermemory.jsonc`,
+    ];
+    for (const path of candidates) {
+      if (existsSync(path)) {
+        const raw = readFileSync(path, "utf8");
+        const stripped = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+        const parsed = JSON.parse(stripped) as FileConfig | null;
+        next = parsed || {};
+        break;
+      }
     }
-    return fallback;
-  };
-
-  return {
-    apiKey: env.SUPERMEMORY_API_KEY || (opt.apiKey as string | undefined),
-    baseUrl:
-      env.SUPERMEMORY_API_URL ||
-      env.SUPERMEMORY_BASE_URL ||
-      (opt.baseUrl as string | undefined),
-    injectOnFirstMessage: bool(
-      opt.injectOnFirstMessage,
-      DEFAULT_CONFIG.injectOnFirstMessage,
-    ),
-    maxProfileItems:
-      typeof opt.maxProfileItems === "number"
-        ? opt.maxProfileItems
-        : DEFAULT_CONFIG.maxProfileItems,
-    maxProjectMemories:
-      typeof opt.maxProjectMemories === "number"
-        ? opt.maxProjectMemories
-        : DEFAULT_CONFIG.maxProjectMemories,
-    maxUserMemories:
-      typeof opt.maxUserMemories === "number"
-        ? opt.maxUserMemories
-        : DEFAULT_CONFIG.maxUserMemories,
-    similarityThreshold:
-      typeof opt.similarityThreshold === "number"
-        ? opt.similarityThreshold
-        : DEFAULT_CONFIG.similarityThreshold,
-    captureEveryNTurns:
-      typeof opt.captureEveryNTurns === "number"
-        ? opt.captureEveryNTurns
-        : DEFAULT_CONFIG.captureEveryNTurns,
-    autoInject: bool(opt.autoInject, DEFAULT_CONFIG.autoInject),
-    debug: bool(opt.debug, bool(env.SUPERMEMORY_DEBUG, DEFAULT_CONFIG.debug)),
-  };
+  } catch {
+    next = {};
+  }
+  fileConfigCache = next;
+  return next;
 }
 
-export function isConfigured(config: PluginRuntimeConfig): boolean {
-  return Boolean(config.apiKey || config.baseUrl);
+export function loadCredentialsFile(): Record<string, string> {
+  try {
+    const home = process.env.USERPROFILE || process.env.HOME || "";
+    const candidates = [
+      `${home}/.supermemory-mimocode/credentials.json`,
+      `${home}\\.supermemory-mimocode\\credentials.json`,
+    ];
+    for (const path of candidates) {
+      if (existsSync(path)) {
+        return JSON.parse(readFileSync(path, "utf8")) || {};
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return {};
+}
+
+export function apiKey(): string {
+  if (process.env.SUPERMEMORY_API_KEY) return process.env.SUPERMEMORY_API_KEY;
+  const file = loadFileConfig();
+  if (file.apiKey) return file.apiKey;
+  return loadCredentialsFile().apiKey || "";
+}
+
+export function baseUrl(): string {
+  return (
+    process.env.SUPERMEMORY_API_URL ||
+    process.env.SUPERMEMORY_BASE_URL ||
+    loadFileConfig().baseUrl ||
+    loadCredentialsFile().apiBaseUrl ||
+    "https://api.supermemory.ai"
+  );
+}
+
+export function autoInjectEnabled(): boolean {
+  const file = loadFileConfig();
+  if (typeof file.autoInject === "boolean") return file.autoInject;
+  return true;
+}
+
+export function keywordPatternStrings(): string[] {
+  const file = loadFileConfig();
+  const extra = Array.isArray(file.keywordPatterns) ? file.keywordPatterns : [];
+  return extra.filter((p): p is string => typeof p === "string");
 }

@@ -1,6 +1,6 @@
 {
   "name": "mimocode-supermemory",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Supermemory plugin for MiMoCode — OpenCode-style plugin[] install UX.",
   "license": "MIT",
   "type": "module",
@@ -13,7 +13,7 @@
   },
   "files": [
     "bin",
-    "dist",
+    "dist/index.js",
     "install.ps1",
     "templates",
     "README.md",
@@ -26,12 +26,41 @@
     "opencode",
     "installer"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wsks2233/mimocode-supermemory.git"
+  },
+  "homepage": "https://github.com/wsks2233/mimocode-supermemory#readme",
+  "bugs": {
+    "url": "https://github.com/wsks2233/mimocode-supermemory/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "peerDependencies": {
     "@mimo-ai/plugin": ">=0.1.0"
   },
+  "peerDependenciesMeta": {
+    "@mimo-ai/plugin": {
+      "optional": true
+    }
+  },
   "scripts": {
     "verify-syntax": "node --check dist/index.js && node --check bin/cli.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "check-src": "node scripts/check-src-contract.mjs",
+    "build": "node scripts/build.mjs",
+    "build:dist": "node scripts/build.mjs --write-dist",
+    "parity": "node scripts/check-dist-parity.mjs",
+    "parity:built": "node scripts/check-dist-parity.mjs dist/index.built.js",
+    "test:contract": "node scripts/check-src-contract.mjs && node scripts/check-dist-parity.mjs",
+    "prepublishOnly": "node scripts/check-src-contract.mjs && node --check dist/index.js && node --check bin/cli.js && node scripts/check-dist-parity.mjs",
     "install:local": "node bin/cli.js install",
     "status": "node bin/cli.js status"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
   }
 }

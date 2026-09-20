@@ -6,10 +6,11 @@ MiMoCode / MiMo Desktop 的 Supermemory 记忆插件。对齐官方 [opencode-su
 
 ## 必读约束
 
-1. **Canonical 运行时是 `dist/index.js`**，不是 `src/`。  
-   - 宿主实际加载的是 VM/cache 里那份 `dist`。  
-   - `src/` 与 dist **尚未完全对齐**；在 src 同步前 **禁止** `tsc` 输出覆盖 `dist/`。  
-   - 改逻辑：改 `dist/index.js`（或同时改 src 并人工对齐），再同步到安装路径。
+1. **运行时产物是 `dist/index.js`；源码真相是 `src/`**（backlog #5 起）。  
+   - 宿主实际加载 cache 里那份 `dist`。  
+   - 改逻辑：改 `src/` → `npm run build` → `dist/index.js` → 同步安装路径。  
+   - 禁止手改 dist 当长期源；`npm run typecheck` 仅 `--noEmit`。  
+   - 发布前跑 `npm run prepublishOnly`（src contract + syntax + parity）。
 
 2. **不要把密钥写进仓库**。`sm_...` 只出现在本机 env / `~/.config/mimocode/supermemory.jsonc` / `~/.supermemory-mimocode/credentials.json`。提交前扫 `sm_[A-Za-z0-9]`。
 
@@ -93,10 +94,15 @@ powershell -ExecutionPolicy Bypass -File install.ps1 -Uninstall
 ```bash
 # 有 Node 时
 node bin/cli.js install|status|login|uninstall
-node --check dist/index.js && node --check bin/cli.js   # package.json: verify-syntax
+node --check dist/index.js && node --check bin/cli.js
+npm run typecheck          # tsc --noEmit
+npm run build              # src → dist
+npm run test:contract      # src contract + dist parity
+npm view mimocode-supermemory version   # 发布后
+mimo plugin mimocode-supermemory        # 发布后官方安装面
 ```
 
-注意：README 里的 `npm run typecheck` / `npm run build` **当前 package.json 未提供**（只有 `verify-syntax` 等）。`tsconfig.json` 的 `outDir: dist` 若被使用会覆盖 canonical dist，先对齐 src 再 build。
+`tsconfig.json` 为 **noEmit**；产物只经 `scripts/build.mjs`（esbuild）写入 `dist/`。
 
 **验收插件已加载**（MiMo 日志）：
 
@@ -118,11 +124,13 @@ tool 调用示例：`supermemory` + `mode=help|search|add|forget`，JSON 应含 
 
 | 路径 | 角色 |
 |------|------|
-| `dist/index.js` | **canonical 插件运行时**（手维/同步产物） |
-| `src/` | TypeScript 草稿；对齐前不要覆盖 dist |
+| `src/` | **TypeScript 源码真相**（对齐已验收 dist 契约；无 supermemory SDK） |
+| `dist/index.js` | 构建产物 / 宿主加载入口（`npm run build`） |
+| `scripts/build.mjs` | esbuild bundle src → dist |
+| `scripts/check-src-contract.mjs` / `check-dist-parity.mjs` | 发布前契约与 parity |
 | `bin/cli.js` | npx/Node 安装器与 login/status |
 | `install.ps1` | Windows 一键安装 / OAuth / status |
-| `templates/` | `.mimocode` 通道 B 降级模板（file hooks 可能宿主加载失败） |
+| `templates/` | slash commands + skills（安装器写入）+ 通道 B 降级 hooks/tools |
 | `docs/compose/spec/` | 各 feature 的验收记录 |
 | `docs/compose/BACKLOG.md` | 对照官方 opencode-supermemory 的差距清单与优先级 |
 | `research/` | 立项调研（含本机路径痕迹，一般不必在实现时阅读） |

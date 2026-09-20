@@ -1,40 +1,97 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { basename } from "node:path";
-import type { ProjectTags } from "./types.js";
+import { loadFileConfig } from "./config.js";
+import type { TagInfo } from "./types.js";
 
-function hashOrigin(origin: string): string {
-  return createHash("sha256").update(origin.trim().toLowerCase()).digest("hex").slice(0, 12);
+export function safeName(raw: string): string {
+  const name = String(raw || "")
+    .split(/[\\/]/)
+    .filter(Boolean)
+    .pop();
+  const cleaned = (name || "").replace(/[^a-zA-Z0-9_-]/g, "_");
+  if (!cleaned || /^_+$/.test(cleaned)) return "";
+  return cleaned;
 }
 
-/** Read git origin via host-provided shell when available. */
-export async function resolveGitOrigin(
-  $: { raw?: unknown; (strings: TemplateStringsArray, ...expr: unknown[]): Promise<{ stdout?: string }> },
-  directory: string,
-): Promise<string | null> {
+export function containerTagSync(directory?: string): string {
+  const file = loadFileConfig();
+  if (file.projectContainerTag && String(file.projectContainerTag).trim()) {
+    return String(file.projectContainerTag).trim();
+  }
+  const raw = directory || process.cwd() || "";
+  const name = safeName(raw);
+  if (name) return `repo_${name}__local`;
+  const path = String(raw || "project");
+  let h = 0;
+  for (let i = 0; i < path.length; i++) {
+    h = (Math.imul(31, h) + path.charCodeAt(i)) | 0;
+  }
+  return `repo_path_${Math.abs(h).toString(16)}__local`;
+}
+
+export function normalizeOrigin(url: string): string {
+  if (!url) return "";
+  let u = String(url).trim().toLowerCase();
+  u = u.replace(/\.git$/, "").replace(/\/$/, "");
+  u = u.replace(/^git@([^:]+):/, "$1/");
+  u = u.replace(/^ssh:\/\//, "").replace(/^https?:\/\//, "");
+  return u;
+}
+
+export function sha12(input: string): string {
+  return createHash("sha256").update(String(input)).digest("hex").slice(0, 12);
+}
+
+export function gitExec(directory: string | undefined, args: string[]): string {
   try {
-    const result = await $`git -C ${directory} remote get-url origin`;
-    const url = typeof result?.stdout === "string" ? result.stdout.trim() : "";
-    return url || null;
+    return String(
+      execFileSync("git", ["-C", String(directory || process.cwd()), ...args], {
+        encoding: "utf8",
+        timeout: 4000,
+        stdio: ["ignore", "pipe", "ignore"],
+      }) || "",
+    ).trim();
   } catch {
-    return null;
+    return "";
   }
 }
 
-export function buildProjectTags(directory: string, origin: string | null): ProjectTags {
-  const projectName = basename(directory) || "project";
-  const key = origin && origin.length > 0 ? origin : directory;
-  const canonical = `repo_${projectName.replace(/[^a-zA-Z0-9_-]/g, "_")}__${hashOrigin(key)}`;
+export async function resolveContainerTag(directory?: string): Promise<TagInfo> {
+  const file = loadFileConfig();
+  const dir = directory || process.cwd();
+  const pinned = file.projectContainerTag && String(file.projectContainerTag).trim();
+  if (pinned) {
+    return {
+      canonical: pinned,
+      source: "config:projectContainerTag",
+      origin: null,
+      projectName: safeName(dir) || "project",
+    };
+  }
+  const root = gitExec(dir, ["rev-parse", "--show-toplevel"]) || dir;
+  const originRaw = gitExec(dir, ["remote", "get-url", "origin"]);
+  const name = safeName(root) || safeName(dir) || "project";
+  if (originRaw) {
+    const origin = normalizeOrigin(originRaw);
+    return {
+      canonical: `repo_${name}__${sha12(origin)}`,
+      source: "git-origin",
+      origin,
+      projectName: name,
+    };
+  }
   return {
-    canonical,
-    projectName,
-    projectId: hashOrigin(key),
+    canonical: containerTagSync(dir),
+    source: "basename-or-path",
+    origin: null,
+    projectName: name,
   };
 }
 
-export async function getProjectTags(
-  directory: string,
-  $?: Parameters<typeof resolveGitOrigin>[0],
-): Promise<ProjectTags> {
-  const origin = $ ? await resolveGitOrigin($, directory) : null;
-  return buildProjectTags(directory, origin);
+export function containerTag(directory?: string): string {
+  return containerTagSync(directory);
+}
+
+export function hashOrigin(origin: string): string {
+  return sha12(normalizeOrigin(origin) || origin);
 }
