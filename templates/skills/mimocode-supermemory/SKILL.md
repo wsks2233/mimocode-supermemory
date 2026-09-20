@@ -1,32 +1,48 @@
 ---
 name: mimocode-supermemory
-description: Use Supermemory persistent memory in MiMoCode — recall prior project context, save durable decisions, inspect profile. Trigger when the user asks about past work, conventions, or "what did we decide".
+description: Supermemory persistent memory for MiMoCode — recall prior project context, save durable decisions, inspect profile, index a codebase. Trigger when the user asks about past work, conventions, "what did we decide", or mentions Supermemory / supermemory tool / supermemory-init / supermemory-status.
 ---
 
 # mimocode-supermemory
 
-This host uses the `supermemory` tool (plugin[] module preferred).
+Host plugin channel: `plugin: ["mimocode-supermemory"]` (canonical runtime `dist/index.js`).
 
-## Modes
+## Slash / skill entries
 
-| Mode | Params | Purpose |
-|------|--------|---------|
-| help | — | Show usage; JSON includes `plugin: mimocode-supermemory` |
-| search | query | Hybrid search in current containerTag |
-| add | content | Store durable fact (taskType memory) |
+| Entry | Purpose |
+|-------|---------|
+| `/supermemory-index` · `/supermemory-init` | Deep-index this codebase into memory |
+| `/supermemory-login` | Browser OAuth |
+| `/supermemory-logout` | Clear local credentials |
+| `/supermemory-status` | Install/connection readiness |
+
+Installer also copies these under `~/.config/mimocode/commands/` and skills under `~/.config/mimocode/skills/`.
+
+## `supermemory` tool modes
+
+| Mode | Args | Purpose |
+|------|------|---------|
+| help | — | Usage; JSON includes `plugin: mimocode-supermemory` |
+| search | `query`, `scope?` | Hybrid search in current containerTag |
+| add | `content`, `scope?` | Store durable fact (`taskType` memory) |
 | profile | — | Profile snapshot |
-| list | — | List documents (if API available) |
+| list | `scope?` | List/search stored documents when API allows |
+| forget | `id`, `scope?` | search → documentId → DELETE `/v3/documents/{id}` |
 
-No `scope` / `forget` in the current module tool (v0.1).
+Optional: `scope=user|project` (writes `sm_scope`), `id` for forget.
+
+Category prefixes in `content` when helpful: `[project-config]`, `[architecture]`, `[learned-pattern]`, `[error-solution]`, `[preference]`.
 
 ## When to use
 
 - User refers to earlier work, decisions, or preferences
 - Task spans sessions
 - Need project context before proposing changes
+- Explicit request to index / remember / forget
 
 ## Do not
 
 - Dump entire search results to the user
-- Save secrets
+- Save secrets or private personal data
 - Call search on every trivial message
+- Assume `permission.ask` auto-allow works on all host versions

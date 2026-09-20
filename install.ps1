@@ -16,13 +16,140 @@ function Get-Paths {
   $userRoot = $env:USERPROFILE
   if (-not $userRoot) { $userRoot = [Environment]::GetFolderPath('UserProfile') }
   [pscustomobject]@{
-    Home       = $userRoot
-    ConfigDir  = Join-Path $userRoot '.config\mimocode'
-    ConfigFile = Join-Path $userRoot '.config\mimocode\mimocode.jsonc'
-    SmFile     = Join-Path $userRoot '.config\mimocode\supermemory.jsonc'
-    CacheRoot  = Join-Path $userRoot ".cache\mimocode\packages\$pkgName@latest\node_modules"
-    CredDir    = Join-Path $userRoot '.supermemory-mimocode'
-    CredFile   = Join-Path $userRoot '.supermemory-mimocode\credentials.json'
+    Home         = $userRoot
+    ConfigDir    = Join-Path $userRoot '.config\mimocode'
+    ConfigFile   = Join-Path $userRoot '.config\mimocode\mimocode.jsonc'
+    SmFile       = Join-Path $userRoot '.config\mimocode\supermemory.jsonc'
+    CommandsDir  = Join-Path $userRoot '.config\mimocode\commands'
+    SkillsDir    = Join-Path $userRoot '.config\mimocode\skills'
+    CacheRoot    = Join-Path $userRoot ".cache\mimocode\packages\$pkgName@latest\node_modules"
+    CredDir      = Join-Path $userRoot '.supermemory-mimocode'
+    CredFile     = Join-Path $userRoot '.supermemory-mimocode\credentials.json'
+  }
+}
+
+$script:SlashCommands = @(
+  'supermemory-index.md',
+  'supermemory-init.md',
+  'supermemory-login.md',
+  'supermemory-logout.md',
+  'supermemory-status.md'
+)
+$script:SlashSkills = @(
+  'supermemory-init',
+  'supermemory-login',
+  'supermemory-logout',
+  'supermemory-status',
+  'mimocode-supermemory'
+)
+$script:Utf8NoBom = New-Object System.Text.UTF8Encoding $false
+
+function Write-TextFile([string]$path, [string]$content) {
+  $dir = Split-Path -Parent $path
+  if ($dir) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+  [System.IO.File]::WriteAllText($path, $content, $script:Utf8NoBom)
+}
+
+function Expand-TemplateTokens([string]$text, [string]$ps1Path, [string]$cliPath) {
+  if ($null -eq $text) { return '' }
+  return $text.Replace('{{PS1}}', $ps1Path).Replace('{{CLI}}', $cliPath).Replace('{{PKG}}', $pkgName)
+}
+
+function Copy-PackageHelpers {
+  param($p, $root)
+  New-Item -ItemType Directory -Path (Join-Path $p.CacheRoot 'bin') -Force | Out-Null
+  $srcPs1 = Join-Path $root 'install.ps1'
+  $srcCli = Join-Path $root 'bin\cli.js'
+  if (Test-Path -LiteralPath $srcPs1) {
+    Copy-Item -LiteralPath $srcPs1 -Destination (Join-Path $p.CacheRoot 'install.ps1') -Force
+  }
+  if (Test-Path -LiteralPath $srcCli) {
+    Copy-Item -LiteralPath $srcCli -Destination (Join-Path $p.CacheRoot 'bin\cli.js') -Force
+  }
+  $srcTpl = Join-Path $root 'templates'
+  $dstTpl = Join-Path $p.CacheRoot 'templates'
+  if (Test-Path -LiteralPath $srcTpl) {
+    New-Item -ItemType Directory -Path $dstTpl -Force | Out-Null
+    Copy-Item -Path (Join-Path $srcTpl '*') -Destination $dstTpl -Recurse -Force
+  }
+}
+
+function Install-SlashAssets {
+  param($p, $root)
+  Copy-PackageHelpers -p $p -root $root
+  $ps1Path = Join-Path $p.CacheRoot 'install.ps1'
+  $cliPath = Join-Path $p.CacheRoot 'bin\cli.js'
+  if (-not (Test-Path -LiteralPath $ps1Path) -and (Test-Path -LiteralPath (Join-Path $root 'install.ps1'))) {
+    $ps1Path = Join-Path $root 'install.ps1'
+  }
+  if (-not (Test-Path -LiteralPath $cliPath) -and (Test-Path -LiteralPath (Join-Path $root 'bin\cli.js'))) {
+    $cliPath = Join-Path $root 'bin\cli.js'
+  }
+
+  $cmdSrc = Join-Path $root 'templates\commands'
+  $cmdCount = 0
+  if (Test-Path -LiteralPath $cmdSrc) {
+    New-Item -ItemType Directory -Path $p.CommandsDir -Force | Out-Null
+    Get-ChildItem -LiteralPath $cmdSrc -Filter '*.md' -File | ForEach-Object {
+      $raw = [System.IO.File]::ReadAllText($_.FullName)
+      Write-TextFile -path (Join-Path $p.CommandsDir $_.Name) -content (Expand-TemplateTokens $raw $ps1Path $cliPath)
+      $cmdCount++
+    }
+  }
+
+  $skSrc = Join-Path $root 'templates\skills'
+  $skCount = 0
+  if (Test-Path -LiteralPath $skSrc) {
+    Get-ChildItem -LiteralPath $skSrc -Directory | ForEach-Object {
+      $skillDir = $_.FullName
+      $skillName = $_.Name
+      $dest = Join-Path $p.SkillsDir $skillName
+      New-Item -ItemType Directory -Path $dest -Force | Out-Null
+      $md = Join-Path $skillDir 'SKILL.md'
+      if (Test-Path -LiteralPath $md) {
+        $raw = [System.IO.File]::ReadAllText($md)
+        Write-TextFile -path (Join-Path $dest 'SKILL.md') -content (Expand-TemplateTokens $raw $ps1Path $cliPath)
+      }
+      $locSrc = Join-Path $skillDir 'locales'
+      if (Test-Path -LiteralPath $locSrc) {
+        $locDst = Join-Path $dest 'locales'
+        New-Item -ItemType Directory -Path $locDst -Force | Out-Null
+        Copy-Item -Path (Join-Path $locSrc '*') -Destination $locDst -Recurse -Force
+      }
+      $skCount++
+    }
+  }
+
+  return [pscustomobject]@{ Commands = $cmdCount; Skills = $skCount; Ps1 = $ps1Path; Cli = $cliPath }
+}
+
+function Test-SlashAssets {
+  param($p)
+  $missingCmd = @()
+  foreach ($name in $script:SlashCommands) {
+    if (-not (Test-Path -LiteralPath (Join-Path $p.CommandsDir $name))) { $missingCmd += $name }
+  }
+  $missingSk = @()
+  foreach ($name in $script:SlashSkills) {
+    if (-not (Test-Path -LiteralPath (Join-Path $p.SkillsDir "$name\SKILL.md"))) { $missingSk += $name }
+  }
+  [pscustomobject]@{
+    CommandsOk  = ($missingCmd.Count -eq 0)
+    SkillsOk    = ($missingSk.Count -eq 0)
+    MissingCmd  = $missingCmd
+    MissingSk   = $missingSk
+  }
+}
+
+function Remove-SlashAssets {
+  param($p)
+  foreach ($name in $script:SlashCommands) {
+    $path = Join-Path $p.CommandsDir $name
+    if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+  }
+  foreach ($name in $script:SlashSkills) {
+    $path = Join-Path $p.SkillsDir $name
+    if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
   }
 }
 
@@ -57,9 +184,29 @@ function Install-Plugin {
   # Official host installer first (best-effort)
   $mimoCmd = Get-Command mimo -ErrorAction SilentlyContinue
   $mimo = if ($mimoCmd) { $mimoCmd.Source } else { 'C:\Users\wsks\.mimocode\bin\mimo.exe' }
-  if (Test-Path -LiteralPath $mimo) {
-    Write-Host "Trying: mimo plugin file:$root"
-    & $mimo plugin ("file:" + $root) 2>&1 | ForEach-Object { Write-Host $_ }
+  if ($env:SUPERMEMORY_SKIP_MIMO_PLUGIN -eq '1') {
+    Write-Host 'Skip mimo plugin file: (SUPERMEMORY_SKIP_MIMO_PLUGIN=1)'
+  } elseif (Test-Path -LiteralPath $mimo) {
+    Write-Host "Trying: mimo plugin file:$root (20s timeout, non-fatal)"
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+      $job = Start-Job -ScriptBlock {
+        param($mimoExe, $pluginArg)
+        & $mimoExe plugin $pluginArg 2>&1
+      } -ArgumentList $mimo, ("file:" + $root)
+      if (Wait-Job -Job $job -Timeout 20) {
+        Receive-Job -Job $job | ForEach-Object { Write-Host $_ }
+      } else {
+        Write-Host 'mimo plugin file: timed out after 20s (non-fatal; package-name path used)'
+        Stop-Job -Job $job -ErrorAction SilentlyContinue
+      }
+      Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+    } catch {
+      Write-Host "mimo plugin file: failed (non-fatal): $($_.Exception.Message)"
+    } finally {
+      $ErrorActionPreference = $prevEap
+    }
   }
 
   New-Item -ItemType Directory -Path $p.CacheRoot -Force | Out-Null
@@ -111,13 +258,18 @@ function Install-Plugin {
     Write-Json $p.SmFile ([pscustomobject]$sample)
   }
 
+  $slash = Install-SlashAssets -p $p -root $root
+
   Write-Host 'mimocode-supermemory installed'
   Write-Host "  mimo plugin : attempted file:$root"
   Write-Host "  cache       : $($p.CacheRoot)"
   Write-Host "  config      : plugin => `"$pkgName`" (stable name + cache)"
   Write-Host "  memory      : $($p.SmFile)"
+  Write-Host "  commands    : $($slash.Commands) files -> $($p.CommandsDir)"
+  Write-Host "  skills      : $($slash.Skills) dirs -> $($p.SkillsDir)"
+  Write-Host "  slash tips  : /supermemory-init /supermemory-login /supermemory-status"
   Write-Host 'Note: file: entries may fail at runtime on 0.1.14; package-name path is verified.'
-  Write-Host '      github:user/repo requires git in PATH.'
+  Write-Host '      github:user/repo requires git in PATH. Restart MiMo after install.'
 }
 
 function Invoke-Login {
@@ -255,6 +407,7 @@ function Show-Status {
     if ($key.Length -le 12) { $mask = $key.Substring(0,4) + '...' }
     else { $mask = $key.Substring(0,6) + '...' + $key.Substring($key.Length-4) }
   }
+  $slash = Test-SlashAssets -p $p
   $ready = (Test-Path $pkg) -and (Test-Path $entry) -and $pluginListed -and [bool]$key
   Write-Host 'mimocode-supermemory status'
   Write-Host ("  package.json : " + $(if (Test-Path $pkg) { 'OK' } else { 'MISSING' }))
@@ -262,6 +415,8 @@ function Show-Status {
   Write-Host ("  plugin[]     : " + $(if ($pluginListed) { 'OK' } else { 'MISSING' }))
   Write-Host ("  API key      : $mask ($source)")
   Write-Host ("  credentials  : " + $(if (Test-Path $p.CredFile) { $p.CredFile } else { 'none' }))
+  Write-Host ("  commands     : " + $(if ($slash.CommandsOk) { 'OK' } else { "MISSING ($($slash.MissingCmd -join ', '))" }))
+  Write-Host ("  skills       : " + $(if ($slash.SkillsOk) { 'OK' } else { "MISSING ($($slash.MissingSk -join ', '))" }))
   Write-Host ("  ready        : " + $(if ($ready) { 'YES' } else { 'NO' }))
   if (-not $ready) { exit 1 }
 }
@@ -278,7 +433,9 @@ function Uninstall-Plugin {
   }
   $cache = Join-Path $p.Home ".cache\mimocode\packages\$pkgName@latest"
   if (Test-Path $cache) { Remove-Item -LiteralPath $cache -Recurse -Force }
+  Remove-SlashAssets -p $p
   Write-Host "uninstalled $pkgName (credentials kept under .supermemory-mimocode)"
+  Write-Host "  removed slash commands/skills under .config/mimocode (if present)"
 }
 
 if ($Status) { Show-Status }

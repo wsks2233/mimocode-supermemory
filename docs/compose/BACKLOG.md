@@ -41,13 +41,13 @@
 | **契约** | forget：search 取 documentId → DELETE documents；同时尝试 v4 memories API（chunk 场景常 Memory not found） |
 | **scope** | tool 参数 `scope=user\|project` → 写入 `sm_scope`；search 尽力过滤 |
 
-### 4. Slash 命令 / skill 安装体验
+### 4. Slash 命令 / skill 安装体验 — **完成 2026-09-20**
 
 | | |
 |--|--|
-| **差距** | 官方 `/supermemory-init`、`/supermemory-login`、`/supermemory-status` |
-| **要做的事** | 按 MiMoCode 约定生成 commands/skills；install.ps1 一并写入 |
-| **验收** | MiMo 会话中能触发对应命令或 skill 文案；init 可索引当前项目要点写入记忆 |
+| **验收结果** | 安装器双写全局 commands（index/init/login/logout/status）+ skills（含 locales）；VM `install.ps1 -Status`：`commands OK` / `skills OK` / `ready YES`；`mimo debug config` 解析 5 个 command；`mimo debug skill` 列出 5 个 skill；init 同款 API 写入后 search 命中 probe（tag `repo_mimocode-supermemory-test__c3d35c834ba4`） |
+| **通道** | `~/.config/mimocode/commands/*.md` + `~/.config/mimocode/skills/<id>/SKILL.md` |
+| **备注** | 无头 `mimo run` 仍 PRE-EXISTING `EUNKNOWN`；交互 TUI 打开测试项目后可直接 `/supermemory-*` |
 
 ### 5. npm 发布 + `mimo plugin mimocode-supermemory`
 

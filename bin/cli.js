@@ -7,9 +7,11 @@
  */
 import {
   copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -29,6 +31,21 @@ const AUTH_BASE_URL =
   process.env.SUPERMEMORY_AUTH_URL || "https://console.supermemory.ai/auth/connect";
 const AUTH_TIMEOUT = Number(process.env.SUPERMEMORY_AUTH_TIMEOUT) || 5 * 60 * 1000;
 
+const SLASH_COMMANDS = [
+  "supermemory-index.md",
+  "supermemory-init.md",
+  "supermemory-login.md",
+  "supermemory-logout.md",
+  "supermemory-status.md",
+];
+const SLASH_SKILLS = [
+  "supermemory-init",
+  "supermemory-login",
+  "supermemory-logout",
+  "supermemory-status",
+  "mimocode-supermemory",
+];
+
 function paths() {
   const home = process.env.USERPROFILE || process.env.HOME || homedir();
   return {
@@ -36,6 +53,8 @@ function paths() {
     configDir: join(home, ".config", "mimocode"),
     configFile: join(home, ".config", "mimocode", "mimocode.jsonc"),
     smConfigFile: join(home, ".config", "mimocode", "supermemory.jsonc"),
+    commandsDir: join(home, ".config", "mimocode", "commands"),
+    skillsDir: join(home, ".config", "mimocode", "skills"),
     credDir: join(home, ".supermemory-mimocode"),
     credFile: join(home, ".supermemory-mimocode", "credentials.json"),
     cacheRoot: join(
@@ -47,6 +66,101 @@ function paths() {
       "node_modules",
     ),
   };
+}
+
+function expandTokens(text, ps1Path, cliPath) {
+  return String(text ?? "")
+    .replaceAll("{{PS1}}", ps1Path)
+    .replaceAll("{{CLI}}", cliPath)
+    .replaceAll("{{PKG}}", PKG_NAME);
+}
+
+function copyPackageHelpers() {
+  const p = paths();
+  mkdirSync(join(p.cacheRoot, "bin"), { recursive: true });
+  mkdirSync(join(p.cacheRoot, "templates"), { recursive: true });
+  const srcPs1 = join(packageRoot, "install.ps1");
+  const srcCli = join(packageRoot, "bin", "cli.js");
+  const srcTpl = join(packageRoot, "templates");
+  if (existsSync(srcPs1)) copyFileSync(srcPs1, join(p.cacheRoot, "install.ps1"));
+  if (existsSync(srcCli)) copyFileSync(srcCli, join(p.cacheRoot, "bin", "cli.js"));
+  if (existsSync(srcTpl)) {
+    try {
+      cpSync(srcTpl, join(p.cacheRoot, "templates"), { recursive: true, force: true });
+    } catch {
+      // fallback: templates remain under packageRoot
+    }
+  }
+  return {
+    ps1Path: existsSync(join(p.cacheRoot, "install.ps1"))
+      ? join(p.cacheRoot, "install.ps1")
+      : join(packageRoot, "install.ps1"),
+    cliPath: existsSync(join(p.cacheRoot, "bin", "cli.js"))
+      ? join(p.cacheRoot, "bin", "cli.js")
+      : join(packageRoot, "bin", "cli.js"),
+  };
+}
+
+function installSlashAssets() {
+  const p = paths();
+  const { ps1Path, cliPath } = copyPackageHelpers();
+  const cmdSrc = join(packageRoot, "templates", "commands");
+  let cmdCount = 0;
+  if (existsSync(cmdSrc)) {
+    mkdirSync(p.commandsDir, { recursive: true });
+    for (const name of readdirSync(cmdSrc)) {
+      if (!name.endsWith(".md")) continue;
+      const src = join(cmdSrc, name);
+      const raw = readFileSync(src, "utf8");
+      writeFileSync(join(p.commandsDir, name), expandTokens(raw, ps1Path, cliPath), "utf8");
+      cmdCount++;
+    }
+  }
+  const skSrc = join(packageRoot, "templates", "skills");
+  let skCount = 0;
+  if (existsSync(skSrc)) {
+    for (const name of SLASH_SKILLS) {
+      const dir = join(skSrc, name);
+      const md = join(dir, "SKILL.md");
+      if (!existsSync(md)) continue;
+      const dest = join(p.skillsDir, name);
+      mkdirSync(dest, { recursive: true });
+      const raw = readFileSync(md, "utf8");
+      writeFileSync(join(dest, "SKILL.md"), expandTokens(raw, ps1Path, cliPath), "utf8");
+      const locSrc = join(dir, "locales");
+      if (existsSync(locSrc)) {
+        cpSync(locSrc, join(dest, "locales"), { recursive: true, force: true });
+      }
+      skCount++;
+    }
+  }
+  return { cmdCount, skCount, ps1Path, cliPath };
+}
+
+function testSlashAssets() {
+  const p = paths();
+  const missingCmd = SLASH_COMMANDS.filter((n) => !existsSync(join(p.commandsDir, n)));
+  const missingSk = SLASH_SKILLS.filter(
+    (n) => !existsSync(join(p.skillsDir, n, "SKILL.md")),
+  );
+  return {
+    commandsOk: missingCmd.length === 0,
+    skillsOk: missingSk.length === 0,
+    missingCmd,
+    missingSk,
+  };
+}
+
+function removeSlashAssets() {
+  const p = paths();
+  for (const name of SLASH_COMMANDS) {
+    const f = join(p.commandsDir, name);
+    if (existsSync(f)) rmSync(f, { force: true });
+  }
+  for (const name of SLASH_SKILLS) {
+    const d = join(p.skillsDir, name);
+    if (existsSync(d)) rmSync(d, { recursive: true, force: true });
+  }
 }
 
 function readJsonc(text) {
@@ -330,10 +444,14 @@ function cmdInstall() {
   const cache = installFiles();
   const cfg = ensurePluginConfig();
   const sm = ensureSmConfigSample();
+  const slash = installSlashAssets();
   console.log("mimocode-supermemory installed (MiMoCode plugin[] channel)");
-  console.log(`  package : ${cache}`);
-  console.log(`  config  : ${cfg}  → plugin: ["${PKG_NAME}"]`);
-  console.log(`  memory  : ${sm}`);
+  console.log(`  package  : ${cache}`);
+  console.log(`  config   : ${cfg}  → plugin: ["${PKG_NAME}"]`);
+  console.log(`  memory   : ${sm}`);
+  console.log(`  commands : ${slash.cmdCount} files → ${paths().commandsDir}`);
+  console.log(`  skills   : ${slash.skCount} dirs → ${paths().skillsDir}`);
+  console.log(`  slash    : /supermemory-init /supermemory-login /supermemory-status`);
   console.log("");
   console.log("Next:");
   console.log("  1. mimocode-supermemory login   (browser OAuth)");
@@ -393,6 +511,7 @@ async function cmdStatus() {
   }
   const { key, source } = resolveApiKey();
   const apiUrl = resolveApiBase();
+  const slash = testSlashAssets();
   const ready = existsSync(pkg) && existsSync(entry) && pluginListed && Boolean(key);
   console.log("mimocode-supermemory status");
   console.log(`  package.json : ${existsSync(pkg) ? "OK" : "MISSING"}  ${pkg}`);
@@ -400,6 +519,12 @@ async function cmdStatus() {
   console.log(`  plugin[]     : ${pluginListed ? "OK" : "MISSING"}  ${p.configFile}`);
   console.log(`  API key      : ${maskKey(key)} (${source})`);
   console.log(`  API URL      : ${apiUrl}`);
+  console.log(
+    `  commands     : ${slash.commandsOk ? "OK" : `MISSING (${slash.missingCmd.join(", ")})`}`,
+  );
+  console.log(
+    `  skills       : ${slash.skillsOk ? "OK" : `MISSING (${slash.missingSk.join(", ")})`}`,
+  );
   if (key) {
     try {
       const res = await fetch(`${apiUrl}/v3/session`, {
@@ -443,7 +568,9 @@ function cmdUninstall() {
   }
   const cache = join(p.home, ".cache", "mimocode", "packages", `${PKG_NAME}@latest`);
   if (existsSync(cache)) rmSync(cache, { recursive: true, force: true });
+  removeSlashAssets();
   console.log(`uninstalled: removed plugin[] entry and ${cache}`);
+  console.log(`removed slash commands/skills under ${p.configDir}`);
   console.log(`kept credentials: ${p.credFile} (use logout to clear)`);
 }
 
@@ -458,13 +585,14 @@ else if (cmd === "status") {
 else {
   console.log(`Usage: mimocode-supermemory <install|login|logout|status|uninstall>
 
-  install   Place plugin into MiMoCode cache + write plugin[] config
+  install   Place plugin into MiMoCode cache + write plugin[] + slash commands/skills
   login     Browser OAuth via console.supermemory.ai (official-compatible)
   logout    Clear local credentials
-  status    Package/config/key/connection readiness
-  uninstall Remove plugin[] entry and cache package
+  status    Package/config/key/connection + commands/skills readiness
+  uninstall Remove plugin[] entry, cache package, and installed slash assets
 
 Browser login uses the same Supermemory connect endpoint as opencode-supermemory.
+Slash: /supermemory-index /supermemory-init /supermemory-login /supermemory-logout /supermemory-status
 `);
   process.exitCode = cmd === "help" || cmd === "--help" || cmd === "-h" ? 0 : 1;
 }

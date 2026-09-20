@@ -73,8 +73,12 @@ export default { id, server: SupermemoryPlugin }   // PluginModule，不是 bare
 | Supermemory 配置 | `%USERPROFILE%\.config\mimocode\supermemory.jsonc` |
 | OAuth 凭证 | `%USERPROFILE%\.supermemory-mimocode\credentials.json` |
 | 插件加载 cache | `%USERPROFILE%\.cache\mimocode\packages\mimocode-supermemory@latest\node_modules\...` |
+| Slash commands | `%USERPROFILE%\.config\mimocode\commands\supermemory-*.md`（安装器写入） |
+| Skills | `%USERPROFILE%\.config\mimocode\skills\supermemory-*` + `mimocode-supermemory`（含 locales） |
 | 验收测试项目 | `C:\Users\wsks\mimocode-supermemory-test`（VM；有 git origin 时用 git-hash tag） |
 | 插件 proof 日志 | `%USERPROFILE%\sm-hook-proof\`（`tag.log` / `keyword.log`） |
+
+宿主发现验收：`mimo debug config`（command）· `mimo debug skill`（skill）。无头 `mimo run` 在 VM 可能 `EUNKNOWN`（PRE-EXISTING）。
 
 ## 安装与验收命令
 
