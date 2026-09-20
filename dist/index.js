@@ -26,7 +26,108 @@ Skip trivial messages. Do not mention this directive.
 const injected = new Set();
 const captureSeen = new Set();
 const turnCounters = new Map();
+const keywordSeen = new Set();
 let fileConfigCache;
+
+const DEFAULT_KEYWORD_PATTERNS = [
+  "\\bremember\\b",
+  "\\bmemorize\\b",
+  "\\bsave\\s+this\\b",
+  "\\bnote\\s+this\\b",
+  "\\bkeep\\s+in\\s+mind\\b",
+  "\\bdon'?t\\s+forget\\b",
+  "\\bdo\\s+not\\s+forget\\b",
+  "\\blearn\\s+this\\b",
+  "\\bstore\\s+this\\b",
+  "\\brecord\\s+this\\b",
+  "\\bmake\\s+a\\s+note\\b",
+  "\\btake\\s+note\\b",
+  "\\bjot\\s+down\\b",
+  "\\bcommit\\s+to\\s+memory\\b",
+  "\\bremember\\s+that\\b",
+  "\\bnever\\s+forget\\b",
+  "\\balways\\s+remember\\b",
+  "记住",
+  "记一下",
+  "别忘了",
+  "不要忘记",
+];
+
+function keywordRegexes() {
+  const file = loadFileConfig();
+  const extra = Array.isArray(file.keywordPatterns) ? file.keywordPatterns : [];
+  const list = [...DEFAULT_KEYWORD_PATTERNS, ...extra.filter((p) => typeof p === "string")];
+  const out = [];
+  for (const p of list) {
+    try {
+      out.push(new RegExp(p, "i"));
+    } catch {
+      /* ignore invalid */
+    }
+  }
+  return out;
+}
+
+function matchKeyword(text) {
+  const t = String(text || "");
+  if (!t.trim()) return null;
+  for (const re of keywordRegexes()) {
+    if (re.test(t)) return re;
+  }
+  return null;
+}
+
+function extractRememberContent(text) {
+  const t = String(text || "").trim();
+  if (!t) return "";
+  const m =
+    t.match(/(?:remember|memorize|记住|记一下|别忘了|不要忘记)\s*(?:that|:|：|\s)\s*([\s\S]+)/i) ||
+    t.match(/(?:don'?t forget|do not forget|never forget)\s*(?:that|:|：)?\s*([\s\S]+)/i) ||
+    t.match(/(?:save|store|record|learn|note)\s+this\s*(?::|：)?\s*([\s\S]+)/i);
+  if (m && m[1] && m[1].trim()) return m[1].trim();
+  return t;
+}
+
+async function keywordCapture(userText, tagInfo) {
+  if (!apiKey() || !autoOn()) return;
+  if (!matchKeyword(userText)) return;
+  const content = extractRememberContent(userText);
+  if (!content) return;
+  const sid = `${PLUGIN_ID}:kw:${tagInfo.canonical}:${sha12(content)}`;
+  if (keywordSeen.has(sid)) return;
+  keywordSeen.add(sid);
+  try {
+    await smRequest("/v3/documents", {
+      content,
+      containerTag: tagInfo.canonical,
+      taskType: "memory",
+      sm_capture_mode: "keyword",
+      sm_scope: "project",
+      project: tagInfo.projectName,
+    });
+    try {
+      const fsP = await import("node:fs");
+      const home = process.env.USERPROFILE || process.env.HOME || "";
+      const pdir = `${home}\\sm-hook-proof`;
+      if (!fsP.existsSync(pdir)) fsP.mkdirSync(pdir, { recursive: true });
+      fsP.appendFileSync(
+        `${pdir}\\keyword.log`,
+        `${new Date().toISOString()} tag=${tagInfo.canonical} content=${content.slice(0, 200)}\n`,
+      );
+    } catch {}
+  } catch {
+    /* never block */
+  }
+}
+
+function userTextFromParts(parts) {
+  const texts = [];
+  for (const p of parts || []) {
+    if (!p || p.synthetic) continue;
+    if (typeof p.text === "string" && p.text.trim()) texts.push(p.text.trim());
+  }
+  return texts.join("\n");
+}
 
 function loadFileConfig() {
   if (fileConfigCache !== undefined) return fileConfigCache;
@@ -363,6 +464,10 @@ export async function SupermemoryPlugin(input) {
       if (!apiKey() || !autoInjectEnabled()) return;
       const parts = (output && output.parts) || [];
       const sessionID = (msgInput && msgInput.sessionID) || "unknown";
+      try {
+        const userText = userTextFromParts(parts);
+        if (userText) await keywordCapture(userText, tagInfo);
+      } catch {}
       const fromInput =
         msgInput && typeof msgInput.messageID === "string" ? msgInput.messageID : "";
       const fromParts =

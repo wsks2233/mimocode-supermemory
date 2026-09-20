@@ -26,13 +26,12 @@
 | **条件** | 去掉 `projectContainerTag` pin；git 可解析 origin（VM 可用 stub 或真 git） |
 | **备注** | 与本地算法一致；无 git 时仍回退 `__local` |
 
-### 2. 关键词自动写入记忆
+### 2. 关键词自动写入记忆 — **完成 2026-09-20**
 
 | | |
 |--|--|
-| **差距** | 官方有 remember / “save this” / “don’t forget” 等自动 capture |
-| **要做的事** | 在 `chat.message` 或 capture 逻辑中检测关键词；命中的用户消息（或回合）以 `sm_capture_mode: keyword` 写入 Supermemory |
-| **验收** | 新会话说 “remember: workspace codename is amber-bridge” 后，API 可搜到该句；**无需**显式 tool add |
+| **验收结果** | 用户消息含 `Remember: the staging deploy window is Thursday 22:00 UTC for amber-bridge.` 后：`keyword.log` 有记录；API search `staging deploy window` **total≥2**（含该句，similarity ~0.82） |
+| **机制** | `chat.message` 关键词命中 → `POST /v3/documents`，`sm_capture_mode: keyword`，tag=当前 git-origin container |
 
 ### 3. tool `forget` + 更完整 scope
 
