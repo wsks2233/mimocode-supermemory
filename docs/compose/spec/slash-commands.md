@@ -3,7 +3,7 @@ feature: slash-commands
 status: delivered
 updated: 2026-09-20
 branch: main
-commits: e2f0e07..working-tree
+commits: e2f0e07..8e143ec
 ---
 
 # Slash / Skill 安装体验（backlog #4）
