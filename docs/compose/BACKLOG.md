@@ -33,13 +33,13 @@
 | **验收结果** | 用户消息含 `Remember: the staging deploy window is Thursday 22:00 UTC for amber-bridge.` 后：`keyword.log` 有记录；API search `staging deploy window` **total≥2**（含该句，similarity ~0.82） |
 | **机制** | `chat.message` 关键词命中 → `POST /v3/documents`，`sm_capture_mode: keyword`，tag=当前 git-origin container |
 
-### 3. tool `forget` + 更完整 scope
+### 3. tool `forget` + 更完整 scope — **完成 2026-09-20（API 验收）**
 
 | | |
 |--|--|
-| **差距** | 官方 tool 有 forget、scope；我们仅有 add 时写 sm_scope |
-| **要做的事** | tool 增加 `mode=forget`（DELETE /v4/memories 或文档等价接口）；search/list 可按 sm_scope 过滤（若 API 支持） |
-| **验收** | add → forget 后 search 不再命中（或标记 forgotten）；help 列出 forget |
+| **验收结果** | `add` probe → search 命中 → `DELETE /v3/documents/{id}` → search **不再命中** |
+| **契约** | forget：search 取 documentId → DELETE documents；同时尝试 v4 memories API（chunk 场景常 Memory not found） |
+| **scope** | tool 参数 `scope=user\|project` → 写入 `sm_scope`；search 尽力过滤 |
 
 ### 4. Slash 命令 / skill 安装体验
 

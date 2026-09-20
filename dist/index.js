@@ -323,7 +323,16 @@ function extractHits(payload) {
         : (item.chunk && item.chunk.content) || "";
     const text = mem || chunk || item.text || "";
     if (text && String(text).trim()) {
-      out.push({ text: String(text).trim(), similarity: item.similarity });
+      const meta = item.metadata || (item.memory && item.memory.metadata) || {};
+      const docs = item.documents || [];
+      const docId = (docs[0] && docs[0].id) || item.documentId || item.id;
+      out.push({
+        text: String(text).trim(),
+        similarity: item.similarity,
+        id: item.id,
+        documentId: docId,
+        sm_scope: meta.sm_scope || item.sm_scope,
+      });
     }
   }
   return out;
@@ -355,6 +364,7 @@ async function executeSupermemory(args, directory, resolvedTag) {
   const tagInfo = resolvedTag || (await resolveContainerTag(directory));
   const tag = tagInfo.canonical;
   const mode = (args && args.mode) || "help";
+  const scope = args && args.scope === "user" ? "personal" : "project";
   const ok = (payload) =>
     JSON.stringify({
       plugin: PLUGIN_ID,
@@ -372,7 +382,14 @@ async function executeSupermemory(args, directory, resolvedTag) {
         containerTag: tag,
         searchMode: "hybrid",
       });
-      return ok({ success: true, results: extractHits(data) });
+      const results = extractHits(data);
+      let filtered = results;
+      if (args && (args.scope === "user" || args.scope === "project")) {
+        const want = args.scope === "user" ? "personal" : "project";
+        const scoped = results.filter((r) => !r.sm_scope || r.sm_scope === want);
+        filtered = scoped.length ? scoped : results;
+      }
+      return ok({ success: true, results: filtered, sm_scope: args?.scope ? scope : undefined });
     }
     if (mode === "profile") {
       const data = await smRequest("/v4/profile", { containerTag: tag });
@@ -381,24 +398,88 @@ async function executeSupermemory(args, directory, resolvedTag) {
     if (mode === "add") {
       const content = args && args.content;
       if (!content) return ok({ success: false, error: "content required" });
-      const smScope = args && args.scope === "user" ? "personal" : "project";
       const data = await smRequest("/v3/documents", {
         content,
         containerTag: tag,
         taskType: "memory",
-        sm_scope: smScope,
+        sm_scope: scope,
         sm_capture_mode: "tool",
         project: tagInfo.projectName,
       });
-      return ok({ success: true, document: data, sm_scope: smScope });
+      return ok({ success: true, document: data, sm_scope: scope });
     }
     if (mode === "list") {
       const data = await smRequest("/v3/documents/list", { containerTag: tag, limit: 20 });
-      return ok({ success: true, documents: data });
+      return ok({ success: true, documents: data, sm_scope_filter: args?.scope || undefined });
+    }
+    if (mode === "forget") {
+      const id = args && args.id;
+      const content = args && args.content;
+      const q = args && args.query;
+      if (!id && !content && !q) {
+        return ok({ success: false, error: "forget requires id, content, or query" });
+      }
+      const deleted = [];
+      const errors = [];
+      const tryMemory = async (body) => {
+        try {
+          const data = await smRequest("/v4/memories", body, "DELETE");
+          deleted.push({ path: "/v4/memories", data });
+          return true;
+        } catch (e) {
+          errors.push(`/v4/memories: ${e && e.message ? e.message : String(e)}`);
+          return false;
+        }
+      };
+      const tryDoc = async (docId) => {
+        if (!docId) return false;
+        try {
+          const data = await smRequest(`/v3/documents/${docId}`, undefined, "DELETE");
+          deleted.push({ path: `/v3/documents/${docId}`, data });
+          return true;
+        } catch (e) {
+          errors.push(`/v3/documents/${docId}: ${e && e.message ? e.message : String(e)}`);
+          return false;
+        }
+      };
+      if (id) {
+        await tryMemory({ containerTag: tag, id });
+        await tryDoc(id);
+      }
+      const searchText = content || q;
+      if (searchText) {
+        const search = await smRequest("/v4/search", {
+          q: searchText,
+          containerTag: tag,
+          searchMode: "hybrid",
+        });
+        const hits = extractHits(search).filter((h) =>
+          content ? h.text.includes(content) || h.text === content : true,
+        );
+        for (const hit of hits.slice(0, 8)) {
+          await tryDoc(hit.documentId || hit.id);
+        }
+        try {
+          const data = await smRequest("/v4/memories/forget-matching", {
+            containerTag: tag,
+            query: searchText,
+            dryRun: false,
+          });
+          deleted.push({ path: "/v4/memories/forget-matching", data });
+        } catch (e) {
+          errors.push(`/v4/memories/forget-matching: ${e && e.message ? e.message : String(e)}`);
+        }
+      }
+      return ok({
+        success: deleted.length > 0,
+        deleted,
+        errors,
+        sm_scope: scope,
+      });
     }
     return ok({
       success: true,
-      help: "modes: search | profile | add | list | help; optional scope=user|project on add",
+      help: "modes: search | profile | add | list | forget | help; scope=user|project; forget uses id or content/query (deletes matching documents + memory APIs)",
       baseUrl: baseUrl(),
     });
   } catch (e) {
@@ -438,15 +519,16 @@ export async function SupermemoryPlugin(input) {
       properties: {
         mode: {
           type: "string",
-          enum: ["search", "profile", "add", "list", "help"],
+          enum: ["search", "profile", "add", "list", "forget", "help"],
           description: "Operation",
         },
-        query: { type: "string", description: "Search query for mode=search" },
-        content: { type: "string", description: "Content for mode=add" },
+        query: { type: "string", description: "Search query or forget-matching query" },
+        content: { type: "string", description: "Content for add, or exact content to forget" },
+        id: { type: "string", description: "Memory/document id for mode=forget" },
         scope: {
           type: "string",
           enum: ["user", "project"],
-          description: "sm_scope metadata for add (default project)",
+          description: "sm_scope metadata (default project)",
         },
       },
     },
