@@ -165,7 +165,9 @@ function Read-Jsonc([string]$path) {
 function Write-Json([string]$path, $obj) {
   $dir = Split-Path -Parent $path
   if ($dir) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-  $obj | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $path -Encoding utf8
+  $json = $obj | ConvertTo-Json -Depth 8
+  # Host JSON parsers reject UTF-8 BOM
+  [System.IO.File]::WriteAllText($path, $json, (New-Object System.Text.UTF8Encoding $false))
 }
 
 function Get-PackageRoot {

@@ -49,13 +49,13 @@
 | **通道** | `~/.config/mimocode/commands/*.md` + `~/.config/mimocode/skills/<id>/SKILL.md` |
 | **备注** | 无头 `mimo run` 仍 PRE-EXISTING `EUNKNOWN`；交互 TUI 打开测试项目后可直接 `/supermemory-*` |
 
-### 5. npm 发布 + `mimo plugin mimocode-supermemory`
+### 5. npm 发布 + `mimo plugin mimocode-supermemory` — **完成 2026-09-20（0.3.1）**
 
 | | |
 |--|--|
-| **差距** | 无 npm 包；`github:` 需 git；`file:` 运行时解析不稳 |
-| **要做的事** | 对齐 src↔dist；`npm publish`（你的 npm 账号）；VM 上 `mimo plugin mimocode-supermemory` 一条命令安装并加载 |
-| **验收** | 全新机器仅用 npm/mimo plugin 完成安装，status ready=YES |
+| **验收结果** | npm **`mimocode-supermemory@0.3.0/0.3.1`** 已发布（`npm view` PASS）；src→esbuild→dist parity PASS；`mimo plugin mimocode-supermemory` VM 输出 `Plugin package ready` / `Installed`；cache `package.json` version **0.3.x**；`install.ps1 -Status` → commands/skills OK · **ready YES** |
+| **包名** | 非 scope `mimocode-supermemory`（与 plugin[] / 官方体验一致） |
+| **备注** | host JSON **拒 BOM**；0.3.1 修复 `install.ps1` no-BOM 写入。发布前跑 `prepublishOnly`（contract+syntax+parity） |
 
 ### 6. Compaction 对齐（谨慎）
 

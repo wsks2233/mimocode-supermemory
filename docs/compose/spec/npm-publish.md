@@ -1,17 +1,25 @@
 ---
 feature: npm-publish
-status: in-progress
+status: delivered
 updated: 2026-09-20
 branch: main
-commits: 65b5a1f..(pending)
+commits: 65b5a1f..(docs close + 0.3.1)
 ---
 
 # npm 发布 + mimo plugin 安装（backlog #5）
 
 ## Report
 
-（实现前：调研与步骤已定，待用户指示动手。）  
-**决策修订 2026-09-20**：包名由 scoped `@wsks2233/mimocode-supermemory` 改为 **非 scope `mimocode-supermemory`**（用户指定，对齐官方安装体验）。
+**What was built** — 包名定为非 scope **`mimocode-supermemory`**（对齐官方安装体验）。`src/` 按已验收 `dist` 契约重写（config/jsonc/credentials、tags 四分支、fetch API、keyword、tool forget、hooks、IPv4），去掉 `supermemory` SDK；`scripts/build.mjs`（esbuild）产出 `dist/index.js`；`check-src-contract` / `check-dist-parity` / `tsc --noEmit` 作为发布门禁 `prepublishOnly`。已 **npm publish**；VM 上 `mimo plugin mimocode-supermemory` 成功（Plugin package ready / Installed），cache `package.json` 为 0.3.x，`install.ps1 -Status` ready=YES（commands/skills OK）。
+
+**Verification** — 本机：SRC_CONTRACT_OK · TSC=0 · PARITY_OK（built+dist，tag git-origin `c3d35c834ba4`）· `node --check` PASS · pack 无 `sm_` 密钥。registry：`npm view mimocode-supermemory` → **0.3.0**（后 **0.3.1** 修 BOM）。VM：`mimo plugin mimocode-supermemory -g` → Installed；status **ready YES**。Review：核心验收 PASS；critical=residual BOM + 文档未收口 → **0.3.1** 修 `install.ps1` no-BOM 并回写 spec/BACKLOG/README。
+
+**Journey log**
+1. 包名曾选 scoped，后改 **非 scope** 以免用户安装命令过长、并与现有 plugin[] 一致。
+2. 「src↔dist 对齐」= 以 dist 为行为规格重写 src，**不是** tsc 盲目覆盖 dist。
+3. `mimo plugin <npm-name>` 可拉 registry 包，但 **不会**可靠覆盖旧 cache 的 version 文件；验收需对照 cache `package.json` 或再跑 install.ps1。
+4. PS 5.1 `Set-Content -Encoding utf8` 会写 **BOM**；MiMo `mimocode.jsonc` 解析 **拒 BOM** → 必须 `WriteAllText` + `UTF8Encoding $false`。
+5. npm 2FA：CLI login 仍可能 E403；需 granular token（Bypass 2FA）或 `publish --otp`。
 
 ## [S1] Problem
 
@@ -222,10 +230,10 @@ mimo plugin <npm-package>
 
 ## Tasks
 
-- [ ] T0: 用户批准步骤/闸门 — acceptance: 明确「按此计划动手」或修改意见；包名=非 scope (covers: S2)
-- [ ] T1: src 契约重写（无 SDK，对齐 dist）— acceptance: contract 脚本 PASS；无 `supermemory` import (covers: S2)
-- [ ] T2: build + parity，经确认后更新 dist — acceptance: parity PASS；verify-syntax PASS (covers: S2; depends: T1)
-- [ ] T3: package.json 非 scope 元数据 + 文档安装命令 — acceptance: pack 清单正确；无密钥 (covers: S2; depends: T2)
-- [ ] T4: npm publish `mimocode-supermemory`（用户登录闸门）— acceptance: `npm view` 可解析该版本 (covers: S2; depends: T3)
-- [ ] T5: VM Node + `mimo plugin mimocode-supermemory` + status ready=YES — acceptance: cache/plugin[] 一致；ready YES (covers: S2; depends: T4)
-- [ ] T6: review + BACKLOG #5 + 本地 commit — acceptance: review PASS；commit 含 backlog #5 (covers: S2; depends: T5)
+- [x] T0: 用户批准步骤/闸门 — acceptance: 包名=非 scope；「动手」 (covers: S2)
+- [x] T1: src 契约重写（无 SDK，对齐 dist）— acceptance: contract 脚本 PASS；无 `supermemory` import (covers: S2)
+- [x] T2: build + parity，更新 dist — acceptance: parity PASS；verify-syntax PASS (covers: S2; depends: T1)
+- [x] T3: package.json 非 scope + 文档安装命令 — acceptance: pack 清单正确；无密钥 (covers: S2; depends: T2)
+- [x] T4: npm publish `mimocode-supermemory`（用户 token）— acceptance: `npm view` 0.3.0 → 0.3.1 (covers: S2; depends: T3)
+- [x] T5: VM `mimo plugin mimocode-supermemory` + status ready=YES — acceptance: cache 0.3.x；ready YES (covers: S2; depends: T4)
+- [x] T6: review + BACKLOG #5 + 本地 commit — acceptance: review 结论入 Report；commit 含 backlog #5 (covers: S2; depends: T5)

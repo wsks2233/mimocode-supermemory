@@ -147,7 +147,7 @@ export async function executeSupermemory(
 export function createSupermemoryTool(tagInfo: TagInfo, directory: string) {
   return {
     description:
-      "Supermemory long-term memory. Modes: search | profile | add | list | help.",
+      "Supermemory long-term memory. Modes: search | profile | add | list | forget | help.",
     parameters: {
       type: "object",
       properties: {

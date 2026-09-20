@@ -12,9 +12,10 @@
 | Supermemory tool + hooks 注入 | tool / inject / keyword / capture 已验收 |
 | 一键安装 `install.ps1` / `node bin/cli.js` | VM `status ready=YES`；slash commands/skills 已装 |
 | Browser OAuth `login` | 与官方同协议 |
-| npm 包 `mimocode-supermemory` | **源码已对齐 src→build→dist**；`npm pack` 0.3.0 就绪，**待 publish** |
-| `mimo plugin mimocode-supermemory` | 发布后验收（cache 路径与现网一致） |
+| npm 包 `mimocode-supermemory` | **已发布**；`npm view` 可解析。源码 `src/` → `npm run build` → `dist/` |
+| `mimo plugin mimocode-supermemory` | VM 已验收：Plugin package ready + cache `0.3.x` + `status ready=YES` |
 | file hooks（`.mimocode/hooks/*.ts`） | VM loader 失败（宿主），不作为主路径 |
+| **注意** | `mimocode.jsonc` **禁止 UTF-8 BOM**；`install.ps1` 须用 no-BOM 写入（0.3.1 起） |
 
 ## OpenCode 路径（我们对齐的目标）
 

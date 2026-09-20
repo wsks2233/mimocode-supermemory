@@ -461,7 +461,7 @@ async function executeSupermemory(args, tagInfo) {
 }
 function createSupermemoryTool(tagInfo, directory) {
   return {
-    description: "Supermemory long-term memory. Modes: search | profile | add | list | help.",
+    description: "Supermemory long-term memory. Modes: search | profile | add | list | forget | help.",
     parameters: {
       type: "object",
       properties: {
