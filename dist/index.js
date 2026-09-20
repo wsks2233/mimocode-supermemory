@@ -3,6 +3,8 @@
  * No npm supermemory dependency — HTTP API via fetch.
  */
 import { existsSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 
 // Prefer IPv4 for Supermemory API (some Windows VMs stall on IPv6).
 try {
@@ -100,7 +102,7 @@ function safeName(raw) {
   return cleaned;
 }
 
-function containerTag(directory) {
+function containerTagSync(directory) {
   const file = loadFileConfig();
   if (file.projectContainerTag && String(file.projectContainerTag).trim()) {
     return String(file.projectContainerTag).trim();
@@ -108,13 +110,76 @@ function containerTag(directory) {
   const raw = directory || process.cwd() || "";
   const name = safeName(raw);
   if (name) return `repo_${name}__local`;
-  // Fallback: stable tag from full path so write/read never collide on empty names.
   const path = String(raw || "project");
   let h = 0;
   for (let i = 0; i < path.length; i++) {
     h = (Math.imul(31, h) + path.charCodeAt(i)) | 0;
   }
   return `repo_path_${Math.abs(h).toString(16)}__local`;
+}
+
+/** Official-style: repo_{name}__{hash(normalized git origin)} */
+function normalizeOrigin(url) {
+  if (!url) return "";
+  let u = String(url).trim().toLowerCase();
+  u = u.replace(/\.git$/, "").replace(/\/$/, "");
+  u = u.replace(/^git@([^:]+):/, "$1/");
+  u = u.replace(/^ssh:\/\//, "").replace(/^https?:\/\//, "");
+  return u;
+}
+
+function sha12(input) {
+  return createHash("sha256").update(String(input)).digest("hex").slice(0, 12);
+}
+
+function gitExec(directory, args) {
+  try {
+    return String(
+      execFileSync("git", ["-C", String(directory || process.cwd()), ...args], {
+        encoding: "utf8",
+        timeout: 4000,
+        stdio: ["ignore", "pipe", "ignore"],
+      }) || "",
+    ).trim();
+  } catch {
+    return "";
+  }
+}
+
+async function resolveContainerTag(directory) {
+  const file = loadFileConfig();
+  const dir = directory || process.cwd();
+  const pinned = file.projectContainerTag && String(file.projectContainerTag).trim();
+  if (pinned) {
+    return {
+      canonical: pinned,
+      source: "config:projectContainerTag",
+      origin: null,
+      projectName: safeName(dir) || "project",
+    };
+  }
+  const root = gitExec(dir, ["rev-parse", "--show-toplevel"]) || dir;
+  const originRaw = gitExec(dir, ["remote", "get-url", "origin"]);
+  const name = safeName(root) || safeName(dir) || "project";
+  if (originRaw) {
+    const origin = normalizeOrigin(originRaw);
+    return {
+      canonical: `repo_${name}__${sha12(origin)}`,
+      source: "git-origin",
+      origin,
+      projectName: name,
+    };
+  }
+  return {
+    canonical: containerTagSync(dir),
+    source: "basename-or-path",
+    origin: null,
+    projectName: name,
+  };
+}
+
+function containerTag(directory) {
+  return containerTagSync(directory);
 }
 
 async function smRequest(path, body, method = "POST") {
@@ -185,10 +250,18 @@ function formatMemoryBlock(tag) {
     });
 }
 
-async function executeSupermemory(args, directory) {
-  const tag = containerTag(directory);
+async function executeSupermemory(args, directory, resolvedTag) {
+  const tagInfo = resolvedTag || (await resolveContainerTag(directory));
+  const tag = tagInfo.canonical;
   const mode = (args && args.mode) || "help";
-  const ok = (payload) => JSON.stringify({ plugin: PLUGIN_ID, containerTag: tag, ...payload });
+  const ok = (payload) =>
+    JSON.stringify({
+      plugin: PLUGIN_ID,
+      containerTag: tag,
+      tagSource: tagInfo.source,
+      origin: tagInfo.origin || undefined,
+      ...payload,
+    });
   try {
     if (mode === "search") {
       const q = args && args.query;
@@ -207,12 +280,16 @@ async function executeSupermemory(args, directory) {
     if (mode === "add") {
       const content = args && args.content;
       if (!content) return ok({ success: false, error: "content required" });
+      const smScope = args && args.scope === "user" ? "personal" : "project";
       const data = await smRequest("/v3/documents", {
         content,
         containerTag: tag,
         taskType: "memory",
+        sm_scope: smScope,
+        sm_capture_mode: "tool",
+        project: tagInfo.projectName,
       });
-      return ok({ success: true, document: data });
+      return ok({ success: true, document: data, sm_scope: smScope });
     }
     if (mode === "list") {
       const data = await smRequest("/v3/documents/list", { containerTag: tag, limit: 20 });
@@ -220,7 +297,7 @@ async function executeSupermemory(args, directory) {
     }
     return ok({
       success: true,
-      help: "modes: search | profile | add | list | help",
+      help: "modes: search | profile | add | list | help; optional scope=user|project on add",
       baseUrl: baseUrl(),
     });
   } catch (e) {
@@ -234,7 +311,23 @@ async function executeSupermemory(args, directory) {
  */
 export async function SupermemoryPlugin(input) {
   const directory = (input && input.directory) || process.cwd();
-  const tag = containerTag(directory);
+  const tagInfo = await resolveContainerTag(directory);
+  const tag = tagInfo.canonical;
+  try {
+    const home = process.env.USERPROFILE || process.env.HOME || "";
+    const dir = `${home}\\sm-hook-proof`;
+    if (!existsSync(dir)) {
+      const { mkdirSync } = await import("node:fs");
+      mkdirSync(dir, { recursive: true });
+    }
+    const { appendFileSync } = await import("node:fs");
+    appendFileSync(
+      `${dir}\\tag.log`,
+      `${new Date().toISOString()} dir=${directory} tag=${tag} source=${tagInfo.source} origin=${tagInfo.origin || "-"}\n`,
+    );
+  } catch {
+    /* ignore */
+  }
 
   const supermemoryTool = {
     description:
@@ -249,10 +342,15 @@ export async function SupermemoryPlugin(input) {
         },
         query: { type: "string", description: "Search query for mode=search" },
         content: { type: "string", description: "Content for mode=add" },
+        scope: {
+          type: "string",
+          enum: ["user", "project"],
+          description: "sm_scope metadata for add (default project)",
+        },
       },
     },
     async execute(args) {
-      return executeSupermemory(args || {}, directory);
+      return executeSupermemory(args || {}, directory, tagInfo);
     },
   };
 
@@ -370,6 +468,9 @@ export async function SupermemoryPlugin(input) {
           content: body,
           containerTag: tag,
           taskType: "memory",
+          sm_scope: "project",
+          sm_capture_mode: "automatic",
+          project: tagInfo.projectName,
         });
       } catch {
         // never block host session
