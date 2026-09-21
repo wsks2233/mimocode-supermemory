@@ -1,0 +1,29 @@
+# npm Trusted Publishing (OIDC) — no long-lived NPM_TOKEN
+# npm docs: https://docs.npmjs.com/trusted-publishers
+# Requires: package settings on npmjs.com bind this exact workflow filename.
+name: Publish Package
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  id-token: write # required for OIDC
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run verify-syntax
+      - run: npm run prepublishOnly
+      - name: npm publish (OIDC)
+        run: npm publish
