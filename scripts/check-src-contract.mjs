@@ -41,8 +41,21 @@ for (const needle of [
   "forget-matching",
   "/v3/documents",
   "/v4/search",
+  "experimental.session.compacting",
+  "compactionInject",
+  "compactionWriteback",
+  "host-checkpoint",
+  "COMPACTION CONTEXT INJECTION",
 ]) {
   if (!all.includes(needle)) errors.push(`src missing contract token: ${needle}`);
+}
+
+// Passive compaction red lines: no host-prompt takeover, no 80% preempt trigger
+if (/output\.prompt\s*=/.test(all)) {
+  errors.push("src must not assign output.prompt (host summarize ownership)");
+}
+if (all.includes("compactionThreshold")) {
+  errors.push("src must not implement official preemptive compactionThreshold");
 }
 
 const index = readFileSync(join(srcDir, "index.ts"), "utf8");

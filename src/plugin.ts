@@ -1,6 +1,12 @@
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { apiKey, autoInjectEnabled } from "./config.js";
-import { extractHits, formatMemoryBlock, smRequest } from "./api.js";
+import { formatMemoryBlock, smRequest } from "./api.js";
+import {
+  compactionInjectEnabled,
+  compactionWritebackEnabled,
+  injectCompactionContext,
+  writebackHostCheckpoint,
+} from "./compaction.js";
 import { PLUGIN_ID, RECALL_DIRECTIVE } from "./constants.js";
 import { keywordCapture, userTextFromParts } from "./keyword.js";
 import { createSupermemoryTool } from "./tool.js";
@@ -112,25 +118,26 @@ export async function SupermemoryPlugin(input?: {
       output.system.push(RECALL_DIRECTIVE);
     },
 
+    /**
+     * Passive compaction (backlog #6): host owns summarize timing.
+     * - output.context = extra context for the host compaction prompt
+     * - never set output.prompt (that would replace host summarize prompt)
+     * - write back host checkpoint.md when present; never trigger compaction
+     */
     "experimental.session.compacting": async (
-      _input: unknown,
-      output: { context?: string[] },
+      input: { sessionID?: string },
+      output: { context?: string[]; prompt?: string },
     ) => {
-      if (!apiKey() || !output) return;
+      if (!apiKey()) return;
       try {
-        const search = await smRequest("/v4/search", {
-          q: "project decisions constraints",
-          containerTag: tag,
-          searchMode: "hybrid",
-        });
-        const hits = extractHits(search);
-        if (hits.length) {
-          if (!output.context) output.context = [];
-          output.context.push(
-            "[COMPACTION CONTEXT INJECTION]\n" +
-              hits.map((h) => `- ${h.text}`).join("\n"),
-          );
+        const sessionID = (input && input.sessionID) || "unknown";
+        if (compactionInjectEnabled()) {
+          await injectCompactionContext(tag, output);
         }
+        if (compactionWritebackEnabled()) {
+          await writebackHostCheckpoint(sessionID, tagInfo);
+        }
+        // Intentionally do not set output.prompt
       } catch {
         /* never block host compaction */
       }

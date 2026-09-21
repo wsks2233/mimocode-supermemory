@@ -20,6 +20,8 @@ expect(mod.default?.id === "mimocode-supermemory", `default.id=${mod.default?.id
 expect(typeof mod.default?.server === "function", "default.server is function");
 expect(typeof mod.SupermemoryPlugin === "function", "named SupermemoryPlugin");
 
+const srcText = await import("node:fs").then((fs) => fs.readFileSync(target, "utf8"));
+
 const hooks = await mod.SupermemoryPlugin({
   directory: process.cwd(),
 });
@@ -33,6 +35,11 @@ for (const key of [
 ]) {
   expect(key in hooks, `hook missing: ${key}`);
 }
+
+expect(typeof hooks["experimental.session.compacting"] === "function", "compacting hook function");
+expect(!/output\.prompt\s*=/.test(srcText), "dist must not assign output.prompt");
+expect(srcText.includes("host-checkpoint") || srcText.includes("compactionWriteback"), "passive compaction writeback present");
+expect(!srcText.includes("compactionThreshold"), "no preemptive compactionThreshold in dist");
 
 expect(hooks.tool?.supermemory, "tool.supermemory present");
 const tool = hooks.tool.supermemory;
@@ -55,13 +62,12 @@ if (help.tagSource === "git-origin") {
   );
 }
 
-// source must not import official SDK in bundle (dist strategy is fetch)
-const srcText = await import("node:fs").then((fs) => fs.readFileSync(target, "utf8"));
 expect(!srcText.includes('from "supermemory"'), "bundle must not import supermemory SDK");
 expect(srcText.includes("ipv4first") || srcText.includes("setDefaultResultOrder"), "ipv4 preference present");
 expect(srcText.includes("sm-hook-proof"), "proof log paths present");
 expect(srcText.includes("/v4/search"), "uses /v4/search");
 expect(srcText.includes("containerTag"), "uses singular containerTag");
+expect(srcText.includes("COMPACTION CONTEXT INJECTION"), "compaction inject marker present");
 
 if (errors.length) {
   console.error("PARITY_FAIL");

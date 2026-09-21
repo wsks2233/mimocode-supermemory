@@ -1,5 +1,5 @@
 // src/plugin.ts
-import { appendFileSync as appendFileSync2, existsSync as existsSync3, mkdirSync as mkdirSync2 } from "node:fs";
+import { appendFileSync as appendFileSync2, existsSync as existsSync4, mkdirSync as mkdirSync2 } from "node:fs";
 
 // src/config.ts
 import { existsSync, readFileSync } from "node:fs";
@@ -139,6 +139,10 @@ function formatMemoryBlock(tag) {
   });
 }
 
+// src/compaction.ts
+import { existsSync as existsSync2, readFileSync as readFileSync2 } from "node:fs";
+import { join } from "node:path";
+
 // src/constants.ts
 var PLUGIN_ID = "mimocode-supermemory";
 var RECALL_DIRECTIVE = `<mimocode-supermemory-recall>
@@ -168,9 +172,6 @@ var DEFAULT_KEYWORD_PATTERNS = [
   "\u522B\u5FD8\u4E86",
   "\u4E0D\u8981\u5FD8\u8BB0"
 ];
-
-// src/keyword.ts
-import { appendFileSync, existsSync as existsSync2, mkdirSync } from "node:fs";
 
 // src/tags.ts
 import { execFileSync } from "node:child_process";
@@ -252,7 +253,100 @@ async function resolveContainerTag(directory) {
   };
 }
 
+// src/compaction.ts
+var compactionSeen = /* @__PURE__ */ new Set();
+function compactionInjectEnabled() {
+  const file = loadFileConfig();
+  if (typeof file.compactionInject === "boolean") return file.compactionInject;
+  return true;
+}
+function compactionWritebackEnabled() {
+  const file = loadFileConfig();
+  if (typeof file.compactionWriteback === "boolean") return file.compactionWriteback;
+  return true;
+}
+function checkpointCandidates(sessionID) {
+  const homes = [process.env.USERPROFILE, process.env.HOME, process.env.MIMOCODE_HOME].filter(
+    (h) => Boolean(h && String(h).trim())
+  );
+  const out = [];
+  for (const home of homes) {
+    const base = process.env.MIMOCODE_HOME ? home : join(home, ".local", "share", "mimocode");
+    out.push(join(base, "sessions", sessionID, "checkpoint.md"));
+    out.push(join(home, ".local", "share", "mimocode", "sessions", sessionID, "checkpoint.md"));
+    out.push(join(home, ".local", "share", "mimocode", "sessions", sessionID, "notes.md"));
+  }
+  return out;
+}
+function readHostCheckpoint(sessionID) {
+  for (const path of checkpointCandidates(sessionID)) {
+    try {
+      if (!existsSync2(path)) continue;
+      const text = readFileSync2(path, "utf8").trim();
+      if (text) return text;
+    } catch {
+    }
+  }
+  return "";
+}
+async function injectCompactionContext(tag, output) {
+  if (!output) return;
+  try {
+    const search = await smRequest("/v4/search", {
+      q: "project decisions constraints architecture",
+      containerTag: tag,
+      searchMode: "hybrid"
+    });
+    const hits = extractHits(search);
+    const lines = ["[COMPACTION CONTEXT INJECTION]", `containerTag: ${tag}`];
+    if (hits.length) {
+      for (const h of hits.slice(0, 8)) lines.push(`- ${h.text}`);
+    } else {
+      lines.push("No stored project memories for this containerTag.");
+    }
+    if (!output.context) output.context = [];
+    output.context.push(lines.join("\n"));
+  } catch {
+  }
+}
+async function writebackHostCheckpoint(sessionID, tagInfo) {
+  const checkpoint = readHostCheckpoint(sessionID);
+  if (!checkpoint.trim()) return false;
+  const body = `[host-checkpoint]
+session=${sessionID}
+${checkpoint}`.slice(0, 12e3);
+  const id = `${PLUGIN_ID}:compaction:${sessionID}:${sha12(body)}`;
+  if (compactionSeen.has(id)) return true;
+  compactionSeen.add(id);
+  try {
+    await smRequest("/v3/documents", {
+      content: body,
+      containerTag: tagInfo.canonical,
+      taskType: "memory",
+      sm_scope: "project",
+      sm_capture_mode: "compaction",
+      project: tagInfo.projectName
+    });
+    try {
+      const home = process.env.USERPROFILE || process.env.HOME || "";
+      const pdir = `${home}\\sm-hook-proof`;
+      const { appendFileSync: appendFileSync3, existsSync: existsSync5, mkdirSync: mkdirSync3 } = await import("node:fs");
+      if (!existsSync5(pdir)) mkdirSync3(pdir, { recursive: true });
+      appendFileSync3(
+        `${pdir}\\compaction.log`,
+        `${(/* @__PURE__ */ new Date()).toISOString()} session=${sessionID} tag=${tagInfo.canonical} wrote=host-checkpoint bytes=${body.length}
+`
+      );
+    } catch {
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // src/keyword.ts
+import { appendFileSync, existsSync as existsSync3, mkdirSync } from "node:fs";
 var keywordSeen = /* @__PURE__ */ new Set();
 function keywordRegexes() {
   const list = [...DEFAULT_KEYWORD_PATTERNS, ...keywordPatternStrings()];
@@ -302,7 +396,7 @@ async function keywordCapture(userText, tagInfo) {
     try {
       const home = process.env.USERPROFILE || process.env.HOME || "";
       const pdir = `${home}\\sm-hook-proof`;
-      if (!existsSync2(pdir)) mkdirSync(pdir, { recursive: true });
+      if (!existsSync3(pdir)) mkdirSync(pdir, { recursive: true });
       appendFileSync(
         `${pdir}\\keyword.log`,
         `${(/* @__PURE__ */ new Date()).toISOString()} tag=${tagInfo.canonical} content=${content.slice(0, 200)}
@@ -507,7 +601,7 @@ function writeProofTag(tagInfo, directory) {
   try {
     const home = process.env.USERPROFILE || process.env.HOME || "";
     const dir = `${home}\\sm-hook-proof`;
-    if (!existsSync3(dir)) mkdirSync2(dir, { recursive: true });
+    if (!existsSync4(dir)) mkdirSync2(dir, { recursive: true });
     appendFileSync2(
       `${dir}\\tag.log`,
       `${(/* @__PURE__ */ new Date()).toISOString()} dir=${directory} tag=${tagInfo.canonical} source=${tagInfo.source} origin=${tagInfo.origin || "-"}
@@ -570,20 +664,21 @@ async function SupermemoryPlugin(input) {
       output.system.push(block);
       output.system.push(RECALL_DIRECTIVE);
     },
-    "experimental.session.compacting": async (_input, output) => {
-      if (!apiKey() || !output) return;
+    /**
+     * Passive compaction (backlog #6): host owns summarize timing.
+     * - output.context = extra context for the host compaction prompt
+     * - never set output.prompt (that would replace host summarize prompt)
+     * - write back host checkpoint.md when present; never trigger compaction
+     */
+    "experimental.session.compacting": async (input2, output) => {
+      if (!apiKey()) return;
       try {
-        const search = await smRequest("/v4/search", {
-          q: "project decisions constraints",
-          containerTag: tag,
-          searchMode: "hybrid"
-        });
-        const hits = extractHits(search);
-        if (hits.length) {
-          if (!output.context) output.context = [];
-          output.context.push(
-            "[COMPACTION CONTEXT INJECTION]\n" + hits.map((h) => `- ${h.text}`).join("\n")
-          );
+        const sessionID = input2 && input2.sessionID || "unknown";
+        if (compactionInjectEnabled()) {
+          await injectCompactionContext(tag, output);
+        }
+        if (compactionWritebackEnabled()) {
+          await writebackHostCheckpoint(sessionID, tagInfo);
         }
       } catch {
       }

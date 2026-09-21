@@ -57,13 +57,13 @@
 | **包名** | 非 scope `mimocode-supermemory`（与 plugin[] / 官方体验一致） |
 | **备注** | host JSON **拒 BOM**；0.3.1 修复 `install.ps1` no-BOM 写入。发布前跑 `prepublishOnly`（contract+syntax+parity） |
 
-### 6. Compaction 对齐（谨慎）
+### 6. Compaction 对齐（宿主 summarize / 被动） — **完成 2026-09-21（被动路径）**
 
 | | |
 |--|--|
-| **差距** | 官方 80% threshold + summarize 写回记忆；我们只 context.push |
-| **要做的事** | 评估是否采用官方抢占式策略；若采用，必须避免 #69/#85 类竞态（阈值可关、不用错误 model limit） |
-| **验收** | 大会话压缩后摘要可检索；宿主 compaction 不被破坏；阈值可配置且可真正关闭 |
+| **验收结果** | **不做**主动 80%/summarize 触发；`experimental.session.compacting`：注入 project 记忆到 `output.context`；**不**设置 `output.prompt`；将宿主 `sessions/<id>/checkpoint.md` 写回 Supermemory（`sm_capture_mode=compaction` / `[host-checkpoint]`）。配置 `compactionInject` / `compactionWriteback` 默认 true 可关。本机 tsc/contract/parity PASS；VM cache dist 含 host-checkpoint，status ready YES；API 写回路径 search 命中 `VM_HOST_SUM_7C21` |
+| **契约** | 宿主 owns summarize timing；插件仅 passive inject + checkpoint write-back |
+| **备注** | 无头 hook 探测需 Node；VM 当前无 node → 以 dist 标记 + API 契约验收。见 `docs/compose/spec/compaction-passive.md` |
 
 ### 7. 宿主能力依赖项（可能无法在插件侧关闭）
 
