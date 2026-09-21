@@ -1,6 +1,7 @@
 # npm Trusted Publishing (OIDC) — no long-lived NPM_TOKEN
 # npm docs: https://docs.npmjs.com/trusted-publishers
-# Requires: package settings on npmjs.com bind this exact workflow filename.
+# On npmjs.com Trusted Publisher: Workflow filename must be exactly "publish.yml"
+# (do NOT enter .github/workflows/publish.yml).
 name: Publish Package
 
 on:
@@ -23,7 +24,8 @@ jobs:
           registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
       - run: npm ci
+      - run: npm install --global npm@latest
       - run: npm run verify-syntax
       - run: npm run prepublishOnly
-      - name: npm publish (OIDC)
-        run: npm publish
+      - name: Publish package (OIDC)
+        run: npm publish --provenance
