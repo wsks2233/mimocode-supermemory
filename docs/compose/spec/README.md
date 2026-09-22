@@ -11,6 +11,7 @@
 | tool-forget-scope | [tool-forget-scope.md](./tool-forget-scope.md) |
 | slash-commands | [slash-commands.md](./slash-commands.md) |
 | npm-publish | [npm-publish.md](./npm-publish.md) |
+| readme-rewrite | [readme-rewrite.md](./readme-rewrite.md) |
 
 **Runtime artifact**: `dist/index.js` (PluginModule `{ id, server }`) — built from `src/` via `npm run build` (esbuild).  
 **Source of truth**: `src/` (TypeScript). `tsconfig.json` is `noEmit`; do not hand-edit `dist/`.  
