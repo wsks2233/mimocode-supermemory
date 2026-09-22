@@ -14,9 +14,10 @@ MiMoCode / MiMo Desktop 的 Supermemory 记忆插件。对齐官方 [opencode-su
 
 2. **不要把密钥写进仓库**。`sm_...` 只出现在本机 env / `~/.config/mimocode/supermemory.jsonc` / `~/.supermemory-mimocode/credentials.json`。提交前扫 `sm_[A-Za-z0-9]`。
 
-3. **Host 限制（MiMoCode 0.1.14，Windows VM 已实测）**  
+3. **Host 限制（MiMoCode 0.1.14，Windows VM 已实测）** — 详见 `docs/UPSTREAM.md`  
    - `.mimocode/hooks/*.ts`：loader 失败（`Cannot find module ...ts.<ts>.mjs` / `Bundle failed`）→ **主路径是 plugin 模块**。  
-   - `permission.ask`：钩子可写，但宿主**未接线**，search 不会自动 allow。  
+   - `permission.ask`：钩子可写并已 **forward-compat allow**（tool=supermemory），但宿主**未接线**前可能无效。  
+   - Desktop UI：无插件扩展面 → **只写上游 issue**，插件侧不碰。  
    - `mimo plugin file:...`：安装可能成功，**运行时解析易挂**；稳定加载 = 配置包名 + cache 落盘（见 README）。  
    - `mimo plugin github:...`：需要 PATH 里有 **git**。  
    - 无头 `mimo run` 在 VM 上可能因宿主 `session.post` 缺 git 报 `EUNKNOWN`（**PRE-EXISTING**，与插件无关）。
@@ -41,7 +42,7 @@ export default { id, server: SupermemoryPlugin }   // PluginModule，不是 bare
 | `experimental.chat.system.transform` | 系统提示注入同一记忆块 |
 | `experimental.session.compacting` | **只** `output.context.push`，不接管宿主 summarize |
 | `session.post` | 会话结束自动 capture（`sm_capture_mode: automatic`） |
-| `permission.ask` | tool=supermemory → allow（宿主未接线前无效） |
+| `permission.ask` | tool=supermemory **全 mode** allow，try/catch 永不抛（宿主未接线前无效） |
 
 ## Supermemory API（写代码时）
 

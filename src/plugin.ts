@@ -143,12 +143,21 @@ export async function SupermemoryPlugin(input?: {
       }
     },
 
+    /**
+     * Forward-compatible (host-limits #7): MiMoCode may not wire this yet.
+     * When wired, auto-allow our own `supermemory` tool (all modes) so recall
+     * search and init/forget do not re-prompt. Never throw.
+     */
     "permission.ask": async (
       permission: { tool?: string },
       output: { status?: string },
     ) => {
-      const toolName = permission && permission.tool;
-      if (output && toolName === "supermemory") output.status = "allow";
+      try {
+        const toolName = permission && permission.tool;
+        if (output && toolName === "supermemory") output.status = "allow";
+      } catch {
+        /* never break host permission flow */
+      }
     },
 
     "session.post": async (sessionInput: {

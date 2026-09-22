@@ -65,13 +65,14 @@
 | **契约** | 宿主 owns summarize timing；插件仅 passive inject + checkpoint write-back |
 | **备注** | 无头 hook 探测需 Node；VM 当前无 node → 以 dist 标记 + API 契约验收。见 `docs/compose/spec/compaction-passive.md` |
 
-### 7. 宿主能力依赖项（可能无法在插件侧关闭）
+### 7. 宿主能力依赖项（可能无法在插件侧关闭） — **完成 2026-09-22（插件侧）**
 
 | | |
 |--|--|
 | **差距** | `permission.ask` 未接线；Desktop UI；file-hook loader |
 | **要做的事** | 向上游反馈/跟版；插件侧保持向前兼容 hook；文档写清限制 |
-| **验收** | 不因宿主未接线导致插件崩溃；上游支持后无需改业务代码即可 auto-allow search |
+| **验收** | 不因宿主未接线导致插件崩溃；上游支持后无需改业务代码即可 auto-allow `supermemory` tool |
+| **验收结果** | `permission.ask` 加固为 tool=supermemory 全 mode allow 且 try/catch 永不抛；`package.json` 声明 `mimo.hooks`；`docs/UPSTREAM.md` 含三份 issue 正文。上游：[MiMo-Code#2472](https://github.com/XiaomiMiMo/MiMo-Code/issues/2472)（permission.ask）、[MiMo-Code#2473](https://github.com/XiaomiMiMo/MiMo-Code/issues/2473)（Desktop UI）已创建；file-hook 沿用 [#1813](https://github.com/XiaomiMiMo/MiMo-Code/issues/1813) 并已补 0.1.14 评论。Desktop **仅上游 issue、插件侧不碰**。见 `docs/compose/spec/host-limits.md`。 |
 
 ### 8. 工程化（src 与 dist 对齐 + 测试）
 

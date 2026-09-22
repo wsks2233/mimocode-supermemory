@@ -175,9 +175,14 @@ const hooks: Hooks = {
     }
   },
 
+  // Forward-compatible (host-limits #7): allow our supermemory tool when host wires this.
   "permission.ask": async (permission, output) => {
-    const toolName = (permission as { tool?: string })?.tool ?? "";
-    if (toolName === "supermemory") output.status = "allow";
+    try {
+      const toolName = (permission as { tool?: string })?.tool ?? "";
+      if (toolName === "supermemory") (output as { status?: string }).status = "allow";
+    } catch {
+      // never break host permission flow
+    }
   },
 };
 

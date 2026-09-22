@@ -46,8 +46,15 @@ for (const needle of [
   "compactionWriteback",
   "host-checkpoint",
   "COMPACTION CONTEXT INJECTION",
+  "permission.ask",
+  'toolName === "supermemory"',
 ]) {
   if (!all.includes(needle)) errors.push(`src missing contract token: ${needle}`);
+}
+
+// permission.ask must fail soft and only auto-allow our tool (host-limits #7)
+if (!/permission\.ask"[\s\S]*?try\s*\{[\s\S]*?toolName === "supermemory"[\s\S]*?\}\s*catch/.test(all)) {
+  errors.push("permission.ask must be try/catch and allow tool supermemory only");
 }
 
 // Passive compaction red lines: no host-prompt takeover, no 80% preempt trigger

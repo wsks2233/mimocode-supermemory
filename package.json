@@ -37,6 +37,17 @@
   "engines": {
     "node": ">=18"
   },
+  "mimo": {
+    "type": "plugin",
+    "hooks": [
+      "chat.message",
+      "permission.ask",
+      "experimental.chat.system.transform",
+      "experimental.session.compacting",
+      "session.post"
+    ],
+    "notes": "Describes the plugin[] module (dist). Channel B templates/hooks omit session.post."
+  },
   "peerDependencies": {
     "@mimo-ai/plugin": ">=0.1.0"
   },
