@@ -1,6 +1,6 @@
 {
   "name": "mimocode-supermemory",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Supermemory plugin for MiMoCode — OpenCode-style plugin[] install UX.",
   "license": "MIT",
   "type": "module",
