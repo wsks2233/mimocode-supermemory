@@ -60,15 +60,17 @@ function Copy-PackageHelpers {
   New-Item -ItemType Directory -Path (Join-Path $p.CacheRoot 'bin') -Force | Out-Null
   $srcPs1 = Join-Path $root 'install.ps1'
   $srcCli = Join-Path $root 'bin\cli.js'
-  if (Test-Path -LiteralPath $srcPs1) {
-    Copy-Item -LiteralPath $srcPs1 -Destination (Join-Path $p.CacheRoot 'install.ps1') -Force
+  $dstPs1 = Join-Path $p.CacheRoot 'install.ps1'
+  $dstCli = Join-Path $p.CacheRoot 'bin\cli.js'
+  if ((Test-Path -LiteralPath $srcPs1) -and ($srcPs1 -ne $dstPs1)) {
+    Copy-Item -LiteralPath $srcPs1 -Destination $dstPs1 -Force
   }
-  if (Test-Path -LiteralPath $srcCli) {
-    Copy-Item -LiteralPath $srcCli -Destination (Join-Path $p.CacheRoot 'bin\cli.js') -Force
+  if ((Test-Path -LiteralPath $srcCli) -and ($srcCli -ne $dstCli)) {
+    Copy-Item -LiteralPath $srcCli -Destination $dstCli -Force
   }
   $srcTpl = Join-Path $root 'templates'
   $dstTpl = Join-Path $p.CacheRoot 'templates'
-  if (Test-Path -LiteralPath $srcTpl) {
+  if ((Test-Path -LiteralPath $srcTpl) -and ($srcTpl -ne $dstTpl)) {
     New-Item -ItemType Directory -Path $dstTpl -Force | Out-Null
     Copy-Item -Path (Join-Path $srcTpl '*') -Destination $dstTpl -Recurse -Force
   }
@@ -214,10 +216,14 @@ function Install-Plugin {
   New-Item -ItemType Directory -Path $p.CacheRoot -Force | Out-Null
   New-Item -ItemType Directory -Path (Join-Path $p.CacheRoot 'dist') -Force | Out-Null
   New-Item -ItemType Directory -Path (Join-Path $p.CacheRoot "$pkgName\dist") -Force | Out-Null
-  Copy-Item -LiteralPath $srcPkg -Destination (Join-Path $p.CacheRoot 'package.json') -Force
-  Copy-Item -LiteralPath $srcDist -Destination (Join-Path $p.CacheRoot 'dist\index.js') -Force
-  Copy-Item -LiteralPath $srcPkg -Destination (Join-Path $p.CacheRoot "$pkgName\package.json") -Force
-  Copy-Item -LiteralPath $srcDist -Destination (Join-Path $p.CacheRoot "$pkgName\dist\index.js") -Force
+  $dstPkg = Join-Path $p.CacheRoot 'package.json'
+  $dstDist = Join-Path $p.CacheRoot 'dist\index.js'
+  $dstNestedPkg = Join-Path $p.CacheRoot "$pkgName\package.json"
+  $dstNestedDist = Join-Path $p.CacheRoot "$pkgName\dist\index.js"
+  if ($srcPkg -ne $dstPkg) { Copy-Item -LiteralPath $srcPkg -Destination $dstPkg -Force }
+  if ($srcDist -ne $dstDist) { Copy-Item -LiteralPath $srcDist -Destination $dstDist -Force }
+  if ($srcPkg -ne $dstNestedPkg) { Copy-Item -LiteralPath $srcPkg -Destination $dstNestedPkg -Force }
+  if ($srcDist -ne $dstNestedDist) { Copy-Item -LiteralPath $srcDist -Destination $dstNestedDist -Force }
 
   $cfg = Read-Jsonc $p.ConfigFile
   $map = [ordered]@{}

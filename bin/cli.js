@@ -16,7 +16,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { arch, hostname, homedir, platform } from "node:os";
 import { randomBytes } from "node:crypto";
@@ -82,22 +82,26 @@ function copyPackageHelpers() {
   const srcPs1 = join(packageRoot, "install.ps1");
   const srcCli = join(packageRoot, "bin", "cli.js");
   const srcTpl = join(packageRoot, "templates");
-  if (existsSync(srcPs1)) copyFileSync(srcPs1, join(p.cacheRoot, "install.ps1"));
-  if (existsSync(srcCli)) copyFileSync(srcCli, join(p.cacheRoot, "bin", "cli.js"));
-  if (existsSync(srcTpl)) {
+  const dstPs1 = join(p.cacheRoot, "install.ps1");
+  const dstCli = join(p.cacheRoot, "bin", "cli.js");
+  const dstTpl = join(p.cacheRoot, "templates");
+  const same = (a, b) => resolve(a) === resolve(b);
+  if (existsSync(srcPs1) && !same(srcPs1, dstPs1)) {
+    copyFileSync(srcPs1, dstPs1);
+  }
+  if (existsSync(srcCli) && !same(srcCli, dstCli)) {
+    copyFileSync(srcCli, dstCli);
+  }
+  if (existsSync(srcTpl) && !same(srcTpl, dstTpl)) {
     try {
-      cpSync(srcTpl, join(p.cacheRoot, "templates"), { recursive: true, force: true });
+      cpSync(srcTpl, dstTpl, { recursive: true, force: true });
     } catch {
-      // fallback: templates remain under packageRoot
+      /* fallback: templates remain under packageRoot */
     }
   }
   return {
-    ps1Path: existsSync(join(p.cacheRoot, "install.ps1"))
-      ? join(p.cacheRoot, "install.ps1")
-      : join(packageRoot, "install.ps1"),
-    cliPath: existsSync(join(p.cacheRoot, "bin", "cli.js"))
-      ? join(p.cacheRoot, "bin", "cli.js")
-      : join(packageRoot, "bin", "cli.js"),
+    ps1Path: existsSync(dstPs1) ? dstPs1 : join(packageRoot, "install.ps1"),
+    cliPath: existsSync(dstCli) ? dstCli : join(packageRoot, "bin", "cli.js"),
   };
 }
 
@@ -335,16 +339,17 @@ function installFiles() {
   mkdirSync(p.cacheRoot, { recursive: true });
   mkdirSync(join(p.cacheRoot, "dist"), { recursive: true });
   mkdirSync(join(p.cacheRoot, PKG_NAME, "dist"), { recursive: true });
-  copyFileSync(join(packageRoot, "package.json"), join(p.cacheRoot, "package.json"));
-  copyFileSync(join(packageRoot, "dist", "index.js"), join(p.cacheRoot, "dist", "index.js"));
-  copyFileSync(
-    join(packageRoot, "package.json"),
-    join(p.cacheRoot, PKG_NAME, "package.json"),
-  );
-  copyFileSync(
-    join(packageRoot, "dist", "index.js"),
-    join(p.cacheRoot, PKG_NAME, "dist", "index.js"),
-  );
+  const same = (a, b) => resolve(a) === resolve(b);
+  const srcPkg = join(packageRoot, "package.json");
+  const srcDist = join(packageRoot, "dist", "index.js");
+  const dstPkg = join(p.cacheRoot, "package.json");
+  const dstDist = join(p.cacheRoot, "dist", "index.js");
+  const dstNestedPkg = join(p.cacheRoot, PKG_NAME, "package.json");
+  const dstNestedDist = join(p.cacheRoot, PKG_NAME, "dist", "index.js");
+  if (!same(srcPkg, dstPkg)) copyFileSync(srcPkg, dstPkg);
+  if (!same(srcDist, dstDist)) copyFileSync(srcDist, dstDist);
+  if (!same(srcPkg, dstNestedPkg)) copyFileSync(srcPkg, dstNestedPkg);
+  if (!same(srcDist, dstNestedDist)) copyFileSync(srcDist, dstNestedDist);
   return p.cacheRoot;
 }
 
