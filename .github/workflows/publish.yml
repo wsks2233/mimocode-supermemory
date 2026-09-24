@@ -25,7 +25,13 @@ jobs:
           package-manager-cache: false
       - run: npm ci
       - run: npm install --global npm@latest
-      - run: npm run verify-syntax
-      - run: npm run prepublishOnly
+      - name: Verify syntax
+        run: npm run verify-syntax
+      - name: Source contract
+        run: node scripts/check-src-contract.mjs
+      - name: Dist parity
+        run: node scripts/check-dist-parity.mjs
+      - name: Unit tests
+        run: node scripts/test-unit.mjs
       - name: Publish package (OIDC)
         run: npm publish --provenance
