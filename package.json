@@ -65,7 +65,9 @@
     "parity": "node scripts/check-dist-parity.mjs",
     "parity:built": "node scripts/check-dist-parity.mjs dist/index.built.js",
     "test:contract": "node scripts/check-src-contract.mjs && node scripts/check-dist-parity.mjs",
-    "prepublishOnly": "node scripts/check-src-contract.mjs && node --check dist/index.js && node --check bin/cli.js && node scripts/check-dist-parity.mjs",
+    "test:unit": "node scripts/test-unit.mjs",
+    "test": "node scripts/test-unit.mjs",
+    "prepublishOnly": "node scripts/check-src-contract.mjs && node --check dist/index.js && node --check bin/cli.js && node scripts/check-dist-parity.mjs && node scripts/test-unit.mjs",
     "install:local": "node bin/cli.js install",
     "status": "node bin/cli.js status"
   },

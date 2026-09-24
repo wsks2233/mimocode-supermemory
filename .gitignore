@@ -3,3 +3,5 @@ dist/index.built.js
 dist/index.js.pre-npm-backup
 *.tgz
 .npmrc
+test/.tmp/
+

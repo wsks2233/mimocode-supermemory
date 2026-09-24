@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { loadFileConfig } from "./config.js";
+import { loadFileConfig, type FileConfig } from "./config.js";
 import type { TagInfo } from "./types.js";
 
 export function safeName(raw: string): string {
@@ -13,8 +13,8 @@ export function safeName(raw: string): string {
   return cleaned;
 }
 
-export function containerTagSync(directory?: string): string {
-  const file = loadFileConfig();
+export function containerTagSync(directory?: string, fileConfig?: FileConfig): string {
+  const file = fileConfig ?? loadFileConfig();
   if (file.projectContainerTag && String(file.projectContainerTag).trim()) {
     return String(file.projectContainerTag).trim();
   }
@@ -56,8 +56,11 @@ export function gitExec(directory: string | undefined, args: string[]): string {
   }
 }
 
-export async function resolveContainerTag(directory?: string): Promise<TagInfo> {
-  const file = loadFileConfig();
+export async function resolveContainerTag(
+  directory?: string,
+  fileConfig?: FileConfig,
+): Promise<TagInfo> {
+  const file = fileConfig ?? loadFileConfig();
   const dir = directory || process.cwd();
   const pinned = file.projectContainerTag && String(file.projectContainerTag).trim();
   if (pinned) {

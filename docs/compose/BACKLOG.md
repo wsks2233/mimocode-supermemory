@@ -74,13 +74,13 @@
 | **验收** | 不因宿主未接线导致插件崩溃；上游支持后无需改业务代码即可 auto-allow `supermemory` tool |
 | **验收结果** | `permission.ask` 加固为 tool=supermemory 全 mode allow 且 try/catch 永不抛；`package.json` 声明 `mimo.hooks`；`docs/UPSTREAM.md` 含三份 issue 正文。上游：[MiMo-Code#2472](https://github.com/XiaomiMiMo/MiMo-Code/issues/2472)（permission.ask）、[MiMo-Code#2473](https://github.com/XiaomiMiMo/MiMo-Code/issues/2473)（Desktop UI）已创建；file-hook 沿用 [#1813](https://github.com/XiaomiMiMo/MiMo-Code/issues/1813) 并已补 0.1.14 评论。Desktop **仅上游 issue、插件侧不碰**。见 `docs/compose/spec/host-limits.md`。 |
 
-### 8. 工程化（src 与 dist 对齐 + 测试）
+### 8. 工程化（src 与 dist 对齐 + 测试） — **完成 2026-09-22**
 
 | | |
 |--|--|
-| **差距** | canonical 为手维 dist；src 未完全同步；缺自动化测试 |
-| **要做的事** | src 实现 PluginModule + 与 dist 同契约；typecheck/build；对 tag 解析/API mock 做最小单测 |
-| **验收** | `npm run build` 产出与 VM 所用行为一致的 dist；关键单测通过 |
+| **验收结果** | #5 已 src→esbuild→dist + parity；本项 **`npm test`**（node:test）**9/9**：normalizeOrigin、**sha12=`c3d35c834ba4`**、`__local`/path、**确定性 pin**、**无 git→basename-or-path**、keyword、extractHits；`tags` 支持 `fileConfig` 隔离；`prepublishOnly` 含 unit+contract |
+| **命令** | `npm test` · `npm run test:contract` · `npm run build:dist` |
+| **备注** | 单测用 esbuild 打到 `test/.tmp` 再 `node --test`（gitignore）；无网络 E2E |
 
 ---
 

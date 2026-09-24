@@ -182,8 +182,8 @@ function safeName(raw) {
   if (!cleaned || /^_+$/.test(cleaned)) return "";
   return cleaned;
 }
-function containerTagSync(directory) {
-  const file = loadFileConfig();
+function containerTagSync(directory, fileConfig) {
+  const file = fileConfig ?? loadFileConfig();
   if (file.projectContainerTag && String(file.projectContainerTag).trim()) {
     return String(file.projectContainerTag).trim();
   }
@@ -221,8 +221,8 @@ function gitExec(directory, args) {
     return "";
   }
 }
-async function resolveContainerTag(directory) {
-  const file = loadFileConfig();
+async function resolveContainerTag(directory, fileConfig) {
+  const file = fileConfig ?? loadFileConfig();
   const dir = directory || process.cwd();
   const pinned = file.projectContainerTag && String(file.projectContainerTag).trim();
   if (pinned) {
