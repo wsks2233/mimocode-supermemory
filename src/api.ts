@@ -77,58 +77,95 @@ export function extractHits(payload: unknown): SmHit[] {
   return out;
 }
 
-/** Official-style multi-section block: Profile + project + personal + query hits. */
+/** Official formatContextForPrompt (opencode-supermemory context.ts). */
+export function formatContextForPrompt(
+  profile: { profile?: { static?: unknown[]; dynamic?: unknown[] } } | null,
+  userMemories: { results?: unknown[] },
+  projectMemories: { results?: unknown[] },
+): string {
+  const factText = (fact: unknown): string => {
+    if (typeof fact === "string") return fact;
+    if (fact != null && typeof fact === "object" && typeof (fact as { content?: string }).content === "string") {
+      return (fact as { content: string }).content;
+    }
+    return fact == null ? "" : String(fact);
+  };
+  const pick = (list: unknown[] | undefined, n: number) =>
+    (list || []).slice(0, n).map(factText).filter(Boolean);
+
+  const parts: string[] = [
+    "[SUPERMEMORY]",
+    'Every line marked ◪ comes from supermemory. When one shapes your answer, credit it naturally with the ◪ prefix; if you name the source, say "from supermemory".',
+  ];
+
+  const staticFacts = pick(profile?.profile?.static, 5);
+  const dynamicFacts = pick(profile?.profile?.dynamic, 5);
+  if (staticFacts.length) {
+    parts.push("\nUser Profile:");
+    for (const f of staticFacts) parts.push(`- ◪ ${f}`);
+  }
+  if (dynamicFacts.length) {
+    parts.push("\nRecent Context:");
+    for (const f of dynamicFacts) parts.push(`- ◪ ${f}`);
+  }
+
+  const score = (sim?: number) =>
+    typeof sim === "number" ? ` [${Math.round(sim * 100)}%]` : "";
+
+  const projectHits = extractHits({ results: projectMemories.results || [] });
+  if (projectHits.length) {
+    parts.push("\nProject Knowledge:");
+    for (const h of projectHits) parts.push(`- ◪${score(h.similarity)} ${h.text}`);
+  }
+
+  const userHits = extractHits({ results: userMemories.results || [] });
+  if (userHits.length) {
+    parts.push("\nRelevant Memories:");
+    for (const h of userHits) parts.push(`- ◪${score(h.similarity)} ${h.text}`);
+  }
+
+  if (parts.length === 2) return "";
+  return parts.join("\n");
+}
+
+/** Legacy name kept for compacting inject. */
 export function formatMemoryBlock(tag: string, hintQuery?: string): Promise<string> {
   return (async () => {
-    const lines = ["[SUPERMEMORY]", `containerTag: ${tag}`];
+    let profile: { profile?: { static?: unknown[]; dynamic?: unknown[] } } | null = null;
     try {
-      const prof = await smRequest("/v4/profile", { containerTag: tag });
-      const p = (prof && (prof.profile || prof)) as Record<string, unknown> | undefined;
-      const parts: string[] = [];
-      const staticP = p && typeof p === "object" ? (p as { static?: string }).static : undefined;
-      const dynP = p && typeof p === "object" ? (p as { dynamic?: string }).dynamic : undefined;
-      if (staticP) parts.push(String(staticP));
-      if (dynP) parts.push(String(dynP));
-      if (parts.length) {
-        lines.push("User Profile:");
-        for (const x of parts.slice(0, 3)) lines.push(`- ${x}`);
+      const raw = await smRequest("/v4/profile", { containerTag: tag });
+      const p = (raw && (raw.profile || raw)) as { profile?: { static?: unknown[]; dynamic?: unknown[] } } | undefined;
+      if (p?.profile) profile = p as { profile: { static?: unknown[]; dynamic?: unknown[] } };
+      else if (raw && (raw.static || raw.dynamic)) {
+        profile = {
+          profile: {
+            static: (raw.static as unknown[]) || [],
+            dynamic: (raw.dynamic as unknown[]) || [],
+          },
+        };
       }
     } catch {
       /* profile optional */
     }
-    const queries = [
-      "project decisions architecture commands conventions",
-      "user identity personal facts preferences family location work",
-      "produce farming sales market products what I make",
-    ];
-    if (hintQuery && hintQuery.trim()) queries.unshift(hintQuery.trim().slice(0, 200));
-    const seen = new Set<string>();
-    const bullets: string[] = [];
-    for (const q of queries) {
+    const fetchMem = async (q: string) => {
       try {
-        const search = await smRequest("/v4/search", {
+        const s = await smRequest("/v4/search", {
           q,
           containerTag: tag,
           searchMode: "hybrid",
+          limit: 10,
         });
-        for (const h of extractHits(search)) {
-          const key = h.text.slice(0, 80);
-          if (seen.has(key)) continue;
-          seen.add(key);
-          bullets.push(`- ${h.text}`);
-          if (bullets.length >= 10) break;
-        }
+        return { results: ((s && s.results) || []) as unknown[] };
       } catch {
-        /* continue */
+        return { results: [] as unknown[] };
       }
-      if (bullets.length >= 10) break;
-    }
-    if (bullets.length) {
-      lines.push("Relevant memories:");
-      lines.push(...bullets);
-    } else {
-      lines.push("No prior memories for this containerTag yet.");
-    }
-    return lines.join("\n");
+    };
+    const project = await fetchMem("project decisions architecture commands conventions");
+    const user = await fetchMem(
+      hintQuery && hintQuery.trim()
+        ? hintQuery.trim().slice(0, 200)
+        : "user identity personal facts preferences location work products",
+    );
+    return formatContextForPrompt(profile, user, project);
   })();
 }

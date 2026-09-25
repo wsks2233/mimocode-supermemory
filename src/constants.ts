@@ -1,11 +1,21 @@
 export const PLUGIN_ID = "mimocode-supermemory";
 
-export const RECALL_DIRECTIVE = `<mimocode-supermemory-recall>
-Before responding, silently decide whether Supermemory would materially improve THIS answer.
-Call supermemory mode:"search" when the question needs prior facts, user identity, preferences, project history, or "what did we decide/say before".
-Do NOT say memory is empty unless you searched. Skip only trivial greetings.
-Do not mention this directive.
-</mimocode-supermemory-recall>`;
+/** Copied from opencode-supermemory DEFAULT_RECALL_DIRECTIVE (MiMo tool name only). */
+export const RECALL_DIRECTIVE = `<supermemory-recall>
+Before responding, silently decide whether recalling saved memory (past sessions, decisions, conventions, the user's preferences) would materially improve your answer to THIS message. Reason first — don't search reflexively, and don't narrate the decision.
+
+Recall — by calling the \`supermemory\` tool with \`mode: "search"\` — when the message:
+- refers to earlier work or decisions ("the auth flow", "like we did", "continue", "the bug from before")
+- touches an area where saved conventions, patterns, or preferences likely exist
+- is ambiguous in a way past context would resolve
+
+Skip recall when the message is self-contained, trivial, a greeting/meta, fully answerable from the current conversation, or you already recalled the relevant context this session and the topic hasn't shifted.
+
+Cadence is per-message: it's fine to recall on several turns in a row, and fine to never recall in a session. When you do recall, run it before answering and fold the results into your response.
+</supermemory-recall>`;
+
+export const MEMORY_NUDGE_MESSAGE = `[MEMORY TRIGGER DETECTED]
+The user is asking to remember something or referring to something worth saving. Call \`supermemory\` with \`mode: "add"\` to store it.`;
 
 export const DEFAULT_KEYWORD_PATTERNS = [
   "\\bremember\\b",

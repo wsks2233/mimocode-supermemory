@@ -7,8 +7,9 @@ import {
   injectCompactionContext,
   writebackHostCheckpoint,
 } from "./compaction.js";
-import { PLUGIN_ID, RECALL_DIRECTIVE } from "./constants.js";
-import { keywordCapture, userTextFromParts } from "./keyword.js";
+import { MEMORY_NUDGE_MESSAGE, PLUGIN_ID, RECALL_DIRECTIVE } from "./constants.js";
+import { keywordCapture, matchKeyword, userTextFromParts } from "./keyword.js";
+import { buildDirectRecallResult, RecallSessionCache } from "./recall.js";
 import { createSupermemoryTool } from "./tool.js";
 import { resolveContainerTag } from "./tags.js";
 import type { TagInfo } from "./types.js";
@@ -16,6 +17,7 @@ import type { TagInfo } from "./types.js";
 const injected = new Set<string>();
 const captureSeen = new Set<string>();
 const turnCounters = new Map<string, number>();
+const recallSessions = new RecallSessionCache();
 
 async function ensureIpv4(): Promise<void> {
   try {
@@ -68,12 +70,7 @@ export async function SupermemoryPlugin(input?: {
       if (!apiKey() || !autoInjectEnabled()) return;
       const parts = ((output && output.parts) || []) as Array<Record<string, unknown>>;
       const sessionID = (msgInput && msgInput.sessionID) || "unknown";
-      try {
-        const userText = userTextFromParts(parts);
-        if (userText) await keywordCapture(userText, tagInfo);
-      } catch {
-        /* ignore */
-      }
+      const userText = userTextFromParts(parts);
       const fromInput =
         msgInput && typeof msgInput.messageID === "string" ? msgInput.messageID : "";
       const fromParts =
@@ -90,21 +87,49 @@ export async function SupermemoryPlugin(input?: {
         sessionID,
         messageID,
       };
-      if (!injected.has(sessionID)) {
-        injected.add(sessionID);
-        const hint = userTextFromParts(parts);
-        const block = await formatMemoryBlock(tag, hint || undefined);
-        parts.unshift({
-          ...basePart,
-          id: `prt_${PLUGIN_ID}-ctx-${Date.now()}`,
-          text: block,
-        });
+      try {
+        if (userText) {
+          // Official keyword → nudge to add; also auto-capture (MiMo compat).
+          if (matchKeyword(userText)) {
+            parts.push({
+              ...basePart,
+              id: `prt_${PLUGIN_ID}-nudge-${Date.now()}`,
+              text: MEMORY_NUDGE_MESSAGE,
+            });
+            await keywordCapture(userText, tagInfo);
+          }
+        }
+        const isFirst = !injected.has(sessionID);
+        if (isFirst) {
+          injected.add(sessionID);
+          const block = await formatMemoryBlock(tag, userText || undefined);
+          if (block) {
+            parts.unshift({
+              ...basePart,
+              id: `prt_${PLUGIN_ID}-ctx-${Date.now()}`,
+              text: block,
+            });
+          }
+        }
+        // Official default recallMode=direct: search THIS prompt every turn
+        if (userText && userText.trim().length >= 12) {
+          const recall = await buildDirectRecallResult({
+            prompt: userText,
+            sessionID,
+            containerTag: tag,
+            cache: recallSessions,
+          });
+          if (recall.context) {
+            parts.push({
+              ...basePart,
+              id: `prt_${PLUGIN_ID}-direct-recall-${Date.now()}`,
+              text: recall.context,
+            });
+          }
+        }
+      } catch {
+        /* never block host */
       }
-      parts.push({
-        ...basePart,
-        id: `prt_${PLUGIN_ID}-recall-${Date.now()}`,
-        text: RECALL_DIRECTIVE,
-      });
       if (output) output.parts = parts;
     },
 
@@ -208,6 +233,7 @@ export async function SupermemoryPlugin(input?: {
           sm_capture_mode: "automatic",
           project: tagInfo.projectName,
         });
+        recallSessions.delete(sessionID);
       } catch {
         /* never block host session */
       }

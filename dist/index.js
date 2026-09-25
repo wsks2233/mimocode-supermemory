@@ -119,56 +119,78 @@ function extractHits(payload) {
   }
   return out;
 }
+function formatContextForPrompt(profile, userMemories, projectMemories) {
+  const factText = (fact) => {
+    if (typeof fact === "string") return fact;
+    if (fact != null && typeof fact === "object" && typeof fact.content === "string") {
+      return fact.content;
+    }
+    return fact == null ? "" : String(fact);
+  };
+  const pick = (list, n) => (list || []).slice(0, n).map(factText).filter(Boolean);
+  const parts = [
+    "[SUPERMEMORY]",
+    'Every line marked \u25EA comes from supermemory. When one shapes your answer, credit it naturally with the \u25EA prefix; if you name the source, say "from supermemory".'
+  ];
+  const staticFacts = pick(profile?.profile?.static, 5);
+  const dynamicFacts = pick(profile?.profile?.dynamic, 5);
+  if (staticFacts.length) {
+    parts.push("\nUser Profile:");
+    for (const f of staticFacts) parts.push(`- \u25EA ${f}`);
+  }
+  if (dynamicFacts.length) {
+    parts.push("\nRecent Context:");
+    for (const f of dynamicFacts) parts.push(`- \u25EA ${f}`);
+  }
+  const score = (sim) => typeof sim === "number" ? ` [${Math.round(sim * 100)}%]` : "";
+  const projectHits = extractHits({ results: projectMemories.results || [] });
+  if (projectHits.length) {
+    parts.push("\nProject Knowledge:");
+    for (const h of projectHits) parts.push(`- \u25EA${score(h.similarity)} ${h.text}`);
+  }
+  const userHits = extractHits({ results: userMemories.results || [] });
+  if (userHits.length) {
+    parts.push("\nRelevant Memories:");
+    for (const h of userHits) parts.push(`- \u25EA${score(h.similarity)} ${h.text}`);
+  }
+  if (parts.length === 2) return "";
+  return parts.join("\n");
+}
 function formatMemoryBlock(tag, hintQuery) {
   return (async () => {
-    const lines = ["[SUPERMEMORY]", `containerTag: ${tag}`];
+    let profile = null;
     try {
-      const prof = await smRequest("/v4/profile", { containerTag: tag });
-      const p = prof && (prof.profile || prof);
-      const parts = [];
-      const staticP = p && typeof p === "object" ? p.static : void 0;
-      const dynP = p && typeof p === "object" ? p.dynamic : void 0;
-      if (staticP) parts.push(String(staticP));
-      if (dynP) parts.push(String(dynP));
-      if (parts.length) {
-        lines.push("User Profile:");
-        for (const x of parts.slice(0, 3)) lines.push(`- ${x}`);
+      const raw = await smRequest("/v4/profile", { containerTag: tag });
+      const p = raw && (raw.profile || raw);
+      if (p?.profile) profile = p;
+      else if (raw && (raw.static || raw.dynamic)) {
+        profile = {
+          profile: {
+            static: raw.static || [],
+            dynamic: raw.dynamic || []
+          }
+        };
       }
     } catch {
     }
-    const queries = [
-      "project decisions architecture commands conventions",
-      "user identity personal facts preferences family location work",
-      "produce farming sales market products what I make"
-    ];
-    if (hintQuery && hintQuery.trim()) queries.unshift(hintQuery.trim().slice(0, 200));
-    const seen = /* @__PURE__ */ new Set();
-    const bullets = [];
-    for (const q of queries) {
+    const fetchMem = async (q) => {
       try {
-        const search = await smRequest("/v4/search", {
+        const s = await smRequest("/v4/search", {
           q,
           containerTag: tag,
-          searchMode: "hybrid"
+          searchMode: "hybrid",
+          limit: 10
         });
-        for (const h of extractHits(search)) {
-          const key = h.text.slice(0, 80);
-          if (seen.has(key)) continue;
-          seen.add(key);
-          bullets.push(`- ${h.text}`);
-          if (bullets.length >= 10) break;
-        }
+        return { results: s && s.results || [] };
       } catch {
+        return { results: [] };
       }
-      if (bullets.length >= 10) break;
-    }
-    if (bullets.length) {
-      lines.push("Relevant memories:");
-      lines.push(...bullets);
-    } else {
-      lines.push("No prior memories for this containerTag yet.");
-    }
-    return lines.join("\n");
+    };
+    const project = await fetchMem("project decisions architecture commands conventions");
+    const user = await fetchMem(
+      hintQuery && hintQuery.trim() ? hintQuery.trim().slice(0, 200) : "user identity personal facts preferences location work products"
+    );
+    return formatContextForPrompt(profile, user, project);
   })();
 }
 
@@ -178,12 +200,20 @@ import { join } from "node:path";
 
 // src/constants.ts
 var PLUGIN_ID = "mimocode-supermemory";
-var RECALL_DIRECTIVE = `<mimocode-supermemory-recall>
-Before responding, silently decide whether Supermemory would materially improve THIS answer.
-Call supermemory mode:"search" when the question needs prior facts, user identity, preferences, project history, or "what did we decide/say before".
-Do NOT say memory is empty unless you searched. Skip only trivial greetings.
-Do not mention this directive.
-</mimocode-supermemory-recall>`;
+var RECALL_DIRECTIVE = `<supermemory-recall>
+Before responding, silently decide whether recalling saved memory (past sessions, decisions, conventions, the user's preferences) would materially improve your answer to THIS message. Reason first \u2014 don't search reflexively, and don't narrate the decision.
+
+Recall \u2014 by calling the \`supermemory\` tool with \`mode: "search"\` \u2014 when the message:
+- refers to earlier work or decisions ("the auth flow", "like we did", "continue", "the bug from before")
+- touches an area where saved conventions, patterns, or preferences likely exist
+- is ambiguous in a way past context would resolve
+
+Skip recall when the message is self-contained, trivial, a greeting/meta, fully answerable from the current conversation, or you already recalled the relevant context this session and the topic hasn't shifted.
+
+Cadence is per-message: it's fine to recall on several turns in a row, and fine to never recall in a session. When you do recall, run it before answering and fold the results into your response.
+</supermemory-recall>`;
+var MEMORY_NUDGE_MESSAGE = `[MEMORY TRIGGER DETECTED]
+The user is asking to remember something or referring to something worth saving. Call \`supermemory\` with \`mode: "add"\` to store it.`;
 var DEFAULT_KEYWORD_PATTERNS = [
   "\\bremember\\b",
   "\\bmemorize\\b",
@@ -451,6 +481,103 @@ function userTextFromParts(parts) {
   return texts.join("\n");
 }
 
+// src/recall.ts
+import { createHash as createHash2 } from "node:crypto";
+var MAX_RECALL_QUERY_CHARS = 500;
+var MIN_RECALL_SIMILARITY = 0.55;
+var MAX_RECALL_RESULTS = 5;
+var MAX_RECALL_HIT_CHARS = 300;
+var MAX_SESSION_RECALL_HASHES = 500;
+function prepareRecallQuery(prompt) {
+  const trimmed = prompt.trim();
+  if (trimmed.length < 12 || /^[\/#\!]/.test(trimmed)) return null;
+  return trimmed.slice(0, MAX_RECALL_QUERY_CHARS);
+}
+function recallTextHash(text) {
+  const normalized = text.toLowerCase().replace(/\s+/g, " ").trim();
+  return createHash2("sha256").update(normalized).digest("hex");
+}
+function formatRecallHit(hit) {
+  const text = hit.text.slice(0, MAX_RECALL_HIT_CHARS);
+  return text;
+}
+var RecallSessionCache = class {
+  constructor(maxHashes = MAX_SESSION_RECALL_HASHES) {
+    this.maxHashes = maxHashes;
+  }
+  maxHashes;
+  sessions = /* @__PURE__ */ new Map();
+  getState(sessionID) {
+    let state = this.sessions.get(sessionID);
+    if (!state) {
+      state = { seen: /* @__PURE__ */ new Set(), order: [] };
+      this.sessions.set(sessionID, state);
+    }
+    return state;
+  }
+  rememberHash(state, hash) {
+    if (state.seen.has(hash)) return false;
+    state.seen.add(hash);
+    state.order.push(hash);
+    while (state.order.length > Math.max(1, this.maxHashes)) {
+      const oldest = state.order.shift();
+      if (oldest) state.seen.delete(oldest);
+    }
+    return true;
+  }
+  rememberTexts(sessionID, texts) {
+    const state = this.getState(sessionID);
+    for (const text of texts) {
+      const t = String(text || "").trim();
+      if (t) this.rememberHash(state, recallTextHash(t));
+    }
+  }
+  takeFresh(sessionID, hits) {
+    const state = this.getState(sessionID);
+    return hits.filter((hit) => this.rememberHash(state, recallTextHash(hit.text)));
+  }
+  delete(sessionID) {
+    this.sessions.delete(sessionID);
+  }
+};
+function formatDirectRecallContext(hits) {
+  return [
+    "<supermemory-context>",
+    "Relevant memories automatically recalled for this prompt. Every line marked \u25EA comes from supermemory:",
+    ...hits.map((hit) => `- \u25EA ${formatRecallHit(hit)}`),
+    'When one shapes your answer, credit it naturally with the \u25EA prefix; if you name the source, say "from supermemory".',
+    "Use these memories only when relevant. Search Supermemory for deeper context if needed.",
+    "</supermemory-context>"
+  ].join("\n");
+}
+async function searchRecall(query, containerTag2) {
+  const data = await smRequest("/v4/search", {
+    q: query,
+    containerTag: containerTag2,
+    searchMode: "hybrid",
+    threshold: MIN_RECALL_SIMILARITY,
+    limit: MAX_RECALL_RESULTS * 2
+  });
+  return extractHits(data).filter((h) => h.similarity === void 0 || h.similarity >= MIN_RECALL_SIMILARITY).slice(0, MAX_RECALL_RESULTS);
+}
+async function buildDirectRecallResult(options) {
+  try {
+    const query = prepareRecallQuery(options.prompt);
+    if (!query) {
+      return { context: "", status: "skipped", count: 0 };
+    }
+    const hits = await searchRecall(query, options.containerTag);
+    const fresh = options.cache.takeFresh(options.sessionID, hits);
+    if (fresh.length === 0) {
+      return { context: "", status: "empty", count: 0 };
+    }
+    const context = formatDirectRecallContext(fresh);
+    return { context, status: "recalled", count: fresh.length };
+  } catch {
+    return { context: "", status: "unavailable", count: 0 };
+  }
+}
+
 // src/tool.ts
 async function executeSupermemory(args, tagInfo) {
   const tag = tagInfo.canonical;
@@ -623,6 +750,7 @@ function createSupermemoryTool(tagInfo, directory) {
 var injected = /* @__PURE__ */ new Set();
 var captureSeen = /* @__PURE__ */ new Set();
 var turnCounters = /* @__PURE__ */ new Map();
+var recallSessions = new RecallSessionCache();
 async function ensureIpv4() {
   try {
     const dns = await import("node:dns");
@@ -660,11 +788,7 @@ async function SupermemoryPlugin(input) {
       if (!apiKey() || !autoInjectEnabled()) return;
       const parts = output && output.parts || [];
       const sessionID = msgInput && msgInput.sessionID || "unknown";
-      try {
-        const userText = userTextFromParts(parts);
-        if (userText) await keywordCapture(userText, tagInfo);
-      } catch {
-      }
+      const userText = userTextFromParts(parts);
       const fromInput = msgInput && typeof msgInput.messageID === "string" ? msgInput.messageID : "";
       const fromParts = parts.find(
         (p) => p && typeof p.messageID === "string" && String(p.messageID).startsWith("msg")
@@ -676,21 +800,46 @@ async function SupermemoryPlugin(input) {
         sessionID,
         messageID
       };
-      if (!injected.has(sessionID)) {
-        injected.add(sessionID);
-        const hint = userTextFromParts(parts);
-        const block = await formatMemoryBlock(tag, hint || void 0);
-        parts.unshift({
-          ...basePart,
-          id: `prt_${PLUGIN_ID}-ctx-${Date.now()}`,
-          text: block
-        });
+      try {
+        if (userText) {
+          if (matchKeyword(userText)) {
+            parts.push({
+              ...basePart,
+              id: `prt_${PLUGIN_ID}-nudge-${Date.now()}`,
+              text: MEMORY_NUDGE_MESSAGE
+            });
+            await keywordCapture(userText, tagInfo);
+          }
+        }
+        const isFirst = !injected.has(sessionID);
+        if (isFirst) {
+          injected.add(sessionID);
+          const block = await formatMemoryBlock(tag, userText || void 0);
+          if (block) {
+            parts.unshift({
+              ...basePart,
+              id: `prt_${PLUGIN_ID}-ctx-${Date.now()}`,
+              text: block
+            });
+          }
+        }
+        if (userText && userText.trim().length >= 12) {
+          const recall = await buildDirectRecallResult({
+            prompt: userText,
+            sessionID,
+            containerTag: tag,
+            cache: recallSessions
+          });
+          if (recall.context) {
+            parts.push({
+              ...basePart,
+              id: `prt_${PLUGIN_ID}-direct-recall-${Date.now()}`,
+              text: recall.context
+            });
+          }
+        }
+      } catch {
       }
-      parts.push({
-        ...basePart,
-        id: `prt_${PLUGIN_ID}-recall-${Date.now()}`,
-        text: RECALL_DIRECTIVE
-      });
       if (output) output.parts = parts;
     },
     "experimental.chat.system.transform": async (_input, output) => {
@@ -771,6 +920,7 @@ async function SupermemoryPlugin(input) {
           sm_capture_mode: "automatic",
           project: tagInfo.projectName
         });
+        recallSessions.delete(sessionID);
       } catch {
       }
     }
