@@ -1,265 +1,153 @@
 # mimocode-supermemory
 
-[![npm version](https://img.shields.io/npm/v/mimocode-supermemory.svg)](https://www.npmjs.com/package/mimocode-supermemory)
-[![license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
-[![node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org/)
+给 **MiMoCode / MiMo Desktop** 加上**长期记忆**：跨会话记住项目约定、决策和偏好。
 
-Supermemory 记忆插件 for **MiMoCode / MiMo Desktop** — 对齐官方 [`opencode-supermemory`](https://github.com/supermemoryai/opencode-supermemory) 的 **`plugin[]` 模块通道**（不是 MCP-only，也不是 file hooks）。
-
-```text
-plugin: ["mimocode-supermemory"]
-  → %USERPROFILE%\.cache\mimocode\packages\mimocode-supermemory@latest\node_modules\
-  → dist/index.js  (PluginModule { id, server })
-```
+参考开源项目 [opencode-supermemory](https://github.com/supermemoryai/opencode-supermemory) 的思路，接到 MiMo 的插件通道（`plugin[]`）上。
 
 ---
 
-## Install
+## 它能做什么
 
-**推荐（官方宿主命令，已发布 npm）：**
+| 能力 | 说明 |
+|------|------|
+| **自动记住** | 会话结束、你说「记住 / Remember」时，写入 Supermemory |
+| **自动想起来** | 新会话开始时注入相关记忆；需要时用 `supermemory` 工具搜索 |
+| **手动管理** | 搜索、添加、查看画像、删除（forget） |
+| **项目隔离** | 按 git 仓库区分记忆（`repo_名__哈希`），不同项目不串 |
+| **斜杠命令** | `/supermemory-init` · `login` · `status` 等 |
+
+---
+
+## 三分钟安装
+
+### 方式 A：有 Node（推荐）
 
 ```bash
 mimo plugin mimocode-supermemory
-# 或全局
-mimo plugin mimocode-supermemory -g
 ```
 
-**有 Node / npx：**
+或：
 
 ```bash
 npx mimocode-supermemory install
-# 仓库内
-node bin/cli.js install
 ```
 
-**Windows 零依赖：**
+### 方式 B：Windows，没有 Node
+
+把本仓库或安装包放到任意目录后：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File install.ps1
 powershell -ExecutionPolicy Bypass -File install.ps1 -Status
 ```
 
-安装器会：优先尝试 `mimo plugin file:<包目录>`，并**始终**执行已验证的 cache 落盘 + 写入 `"plugin": ["mimocode-supermemory"]` 到 `%USERPROFILE%\.config\mimocode\mimocode.jsonc`（**禁止 UTF-8 BOM**，0.3.1 起 no-BOM）。
+看到 **`ready : YES`** 即安装成功。
 
-### 稳定加载条件（MiMoCode 0.1.14 实测）
+### 登录 Supermemory
 
-| 方式 | 结果 |
-|------|------|
-| 包名条目 + cache 落盘 | **稳定加载**（主路径） |
-| `mimo plugin file:...` / 绝对路径 | 可能安装成功，**运行时解析易挂** |
-| `mimo plugin github:user/repo` | 需要 PATH 中有 **git** |
-
-cache 路径：
-
-```text
-%USERPROFILE%\.cache\mimocode\packages\mimocode-supermemory@latest\node_modules\
-  package.json
-  dist/index.js
-  mimocode-supermemory/package.json
-  mimocode-supermemory/dist/index.js
-```
-
-安装器会同步维护以上两份 `package.json` / `dist/index.js`，避免宿主不同解析路径读到不同版本。
-
-重启 MiMoCode / 新 Desktop 会话后，日志应出现：
-
-```text
-service=plugin path=mimocode-supermemory loading plugin
-```
-
-模板通道 B（降级 / 仅工具可用）见 [`templates/`](./templates)：`.mimocode/tools/`、`.mimocode/hooks/`（**Windows file-hook loader 当前失败，不作为主路径**）、`.mimocode/skills/`。
-
----
-
-## Authenticate
-
-与官方同协议的 Browser OAuth：
+任选其一：
 
 ```powershell
+# 浏览器 OAuth（推荐）
 powershell -ExecutionPolicy Bypass -File install.ps1 -Login
-# 或
-npx mimocode-supermemory login
-node bin/cli.js login
 ```
 
-```text
-https://console.supermemory.ai/auth/connect?callback=http://127.0.0.1:{port}/callback&client=mimocode
-  → 回调 apikey=sm_…
-  → 写入 %USERPROFILE%\.supermemory-mimocode\credentials.json
-  → 同步 ~/.config/mimocode/supermemory.jsonc 的 apiKey
-```
-
-**Key 读取顺序：**
-
-1. `SUPERMEMORY_API_KEY` 环境变量
-2. `~/.config/mimocode/supermemory.jsonc` → `apiKey`
-3. `~/.supermemory-mimocode/credentials.json`
-
-手动 Key（官方也支持）：
+或设置环境变量（从 https://console.supermemory.ai/keys 获取）：
 
 ```powershell
-[Environment]::SetEnvironmentVariable("SUPERMEMORY_API_KEY", "sm_...", "User")
+[System.Environment]::SetEnvironmentVariable("SUPERMEMORY_API_KEY", "sm_你的密钥", "User")
 ```
 
-查看状态（不打印完整 Key）：`install.ps1 -Status` 或 `node bin/cli.js status`。
+登录后**重启 MiMo / 新建会话**。
 
 ---
 
-## Capabilities
+## 怎么用
 
-### Tool `supermemory`
+在 **MiMo 会话里**（TUI 或 Desktop，不是 PowerShell）输入：
 
-| Mode | 参数 | 作用 |
-|------|------|------|
-| `search` | `query`, `scope?` | 对当前 containerTag 做 hybrid 检索 |
-| `profile` | — | 返回当前 containerTag 的画像 |
-| `add` | `content`, `scope?` | 写入一条记忆 |
-| `list` | `scope?` | 列出最近文档 |
-| `forget` | `id` 或 `content` / `query`，`scope?` | 按 id 或匹配内容清理 document / memory |
-| `help` | — | 返回契约、`containerTag` 与 `tagSource` |
-
-可选 `scope=user|project`：默认 `project`；`user` 写入 `sm_scope=personal`，`project` 写入 `sm_scope=project`。带 `scope` 的 `search` 会优先过滤对应元数据；`list` 在返回中给出 `sm_scope_filter`。
-
-`forget` 的稳定主路径是 **search → `documentId` → `DELETE /v3/documents/{id}`**；传入 `id` 时也会尝试 memory API，传入 `content` / `query` 时还会调用 forget-matching。
-
-### Hooks（模块插件）
-
-| Hook | 行为 |
+| 命令 | 作用 |
 |------|------|
-| `chat.message` | 每会话首回合注入 `[SUPERMEMORY]`，每回合追加 recall 指令；命中关键词时自动写入（`sm_capture_mode: keyword`） |
-| `experimental.chat.system.transform` | 系统提示注入同一记忆块 |
-| `experimental.session.compacting` | 被动注入 `output.context`，并可把 host checkpoint 写回；**不**设置 `output.prompt` 或触发 summarize |
-| `session.post` | 会话结束自动 capture（`sm_capture_mode: automatic`） |
-| `permission.ask` | tool=`supermemory` 全 mode allow（try/catch 永不抛）；**宿主未接线前可能无效** |
+| `/supermemory-status` | 看插件是否就绪 |
+| `/supermemory-init` | 深入读一遍项目，把架构/命令/约定写入记忆 |
+| `/supermemory-login` | 浏览器登录 |
+| `/supermemory-logout` | 清除本机登录（保留安装） |
+| `/supermemory-index` | 与 init 相同（官方别名） |
 
-### containerTag 解析顺序
+平时也可以直接说：
 
-1. `supermemory.jsonc` → `projectContainerTag`（显式 pin，测试/隔离用）
-2. **git origin**（规范化后 sha256 前 12 位）→ `repo_{git-root-name}__{hash}`
-3. 非 git / 无 origin：目录 basename → `repo_{name}__local`
-4. basename 非法 → `repo_path_{hash}__local`
+- 「记住：发布必须走 OIDC」
+- 「我们之前定过什么部署窗口？」
+- 「把这个项目的测试命令存下来」
 
-关键词自动写、session capture、tool `add` 使用**同一** containerTag。
+插件会在合适时自动读写记忆；需要时调用工具 `supermemory`（模式：`search` / `add` / `profile` / `list` / `forget` / `help`）。
 
-### 架构（精简）
+---
 
-```text
-MiMoCode  plugin: ["mimocode-supermemory"]
-        │
-        ▼
-  PluginModule { id, server }
-        ├─ tool.supermemory   search|profile|add|list|forget|help
-        ├─ chat.message       recall + keyword capture
-        ├─ system.transform   系统提示注入
-        ├─ compacting         context.push + checkpoint writeback（被动）
-        ├─ session.post       automatic capture
-        └─ permission.ask     forward-compat allow
-        │
-        ▼
-  Supermemory HTTP API
-    POST /v3/documents · POST /v4/search (field q) · POST /v4/profile
-    DELETE /v3/documents/{id}   ← forget 主路径
+## 配置（可选）
+
+文件：`~/.config/mimocode/supermemory.jsonc`
+
+```jsonc
+{
+  "apiKey": "",              // 也可用 SUPERMEMORY_API_KEY
+  "autoInject": true,        // 新会话是否自动注入记忆
+  "compactionInject": true,  // 压缩时是否带入项目记忆
+  "compactionWriteback": true // 是否把宿主 checkpoint 写回 Supermemory
+}
 ```
 
----
-
-## Slash commands & skills
-
-安装器写入全局：
-
-- Commands：`/supermemory-index` · `/supermemory-init` · `/supermemory-login` · `/supermemory-logout` · `/supermemory-status`
-- Skills：`mimocode-supermemory`、`supermemory-init`、`supermemory-login`、`supermemory-logout`、`supermemory-status`（含 `locales/`）
-
-验收：`mimo debug config` / `mimo debug skill`；交互 TUI 打开项目后可直接 `/supermemory-*`。
+- **不要**把真实密钥提交进 Git。  
+- 配置文件**不要**带 UTF-8 BOM（记事本另存为时注意）。
 
 ---
 
-## Verify
-
-| 检查 | 期望 |
-|------|------|
-| 日志 | `service=plugin path=mimocode-supermemory loading plugin` |
-| Tool | `supermemory` + `mode=help` JSON 含 `"plugin":"mimocode-supermemory"`、`containerTag` / `tagSource` |
-| Status | `install.ps1 -Status` 或 `node bin/cli.js status` → commands OK · skills OK · **ready YES** |
-| Proof logs | `%USERPROFILE%\sm-hook-proof\` 下按实际触发出现 `tag.log` / `keyword.log` / `compaction.log` |
-
----
-
-## Host limits（0.1.14 已知）
-
-| 项 | 状态 |
-|----|------|
-| `.mimocode/hooks/*.ts` | Windows loader 失败 → **主路径是 plugin 模块** |
-| `permission.ask` | 插件侧已写 forward-compat allow；宿主**未接线**前可能 no-op |
-| Desktop UI 扩展面 | **无** → 仅上游 issue，插件侧不碰 |
-| 无头 `mimo run` | VM 可能 `EUNKNOWN`（缺 git / session.post）— **PRE-EXISTING**，与插件无关 |
-
-上游 issue 与正文：[`docs/UPSTREAM.md`](./docs/UPSTREAM.md)（MiMo-Code #2472 / #2473 / #1813 等）。
-
----
-
-## Configuration
-
-复制 [`.env.example`](./.env.example)，至少配置 `SUPERMEMORY_API_KEY`。
-
-`%USERPROFILE%\.config\mimocode\supermemory.jsonc` 常用字段：
-
-| 字段 | 说明 |
-|------|------|
-| `apiKey` | Supermemory key（也可用 env） |
-| `baseUrl` | 自托管端点；env 也支持 `SUPERMEMORY_API_URL` / `SUPERMEMORY_BASE_URL` |
-| `autoInject` | 默认 `true`；关闭自动注入与 keyword/session capture |
-| `projectContainerTag` | 显式 pin container（测试/隔离） |
-| `keywordPatterns` | 追加关键词正则 |
-| `compactionInject` / `compactionWriteback` | 被动 compaction 开关，默认 `true` |
-
-写入 MiMo JSON 配置时 **禁止 UTF-8 BOM**。
-
----
-
-## Develop
-
-源码真相是 **`src/`**；宿主加载的是 **`dist/index.js`**（esbuild bundle）。`tsconfig.json` 为 `noEmit`。
+## 开发者
 
 ```bash
-npm ci
-npm run typecheck        # tsc --noEmit
-npm run build            # src → dist
-npm run test:contract    # src contract + dist parity
-npm run verify-syntax    # node --check dist + bin
-npm run prepublishOnly   # 发布门禁
+npm install
+npm run typecheck
+npm run build:dist
+npm test
+npm run test:contract
 ```
 
-改逻辑：改 `src/` → `npm run build` → 同步 cache 安装路径。**禁止**手改 `dist/` 当长期源。
+- 源码在 `src/`，构建产物是 `dist/index.js`（宿主加载的是 dist）。  
+- 发版：改 `package.json` 的 `version` → 打 tag `vX.Y.Z` → GitHub Actions 自动 `npm publish`。
 
-### 目录
+---
 
-| 路径 | 角色 |
+## 常见问题
+
+| 现象 | 处理 |
 |------|------|
-| `src/` | TypeScript 源码（无 supermemory SDK） |
-| `dist/index.js` | 构建产物 / 宿主加载入口 |
-| `scripts/` | build · src-contract · dist-parity |
-| `bin/cli.js` | npx/Node 安装器与 login/status |
-| `install.ps1` | Windows 一键安装 / OAuth / status |
-| `templates/` | slash commands + skills + 通道 B 降级 |
-| `docs/compose/spec/` | 各 feature 验收记录 |
-| `docs/compose/BACKLOG.md` | 对照官方差距清单 |
-| `docs/UPSTREAM.md` | 宿主缺口 issue 正文 |
-| `research/` | 立项调研（一般不必在实现时阅读） |
+| `status` 显示 ready NO | 先 `install.ps1 -Status`，看缺 package / plugin / key 哪一项 |
+| 找不到 `/supermemory-*` | 在 **MiMo 对话输入框** 里输，不是在 PowerShell；重启 MiMo 后再试 |
+| 记忆「想不起来」 | 用 `/supermemory-init` 索引项目；确认在**该项目目录**打开会话 |
+| `mimo run` 报 EUNKNOWN | 多为 **MiMoCode 宿主/环境** 问题，与本插件无关；可改用 TUI / Desktop |
 
-### 设计红线（摘要）
+更多说明见 `docs/` 与 `docs/compose/`。
 
-1. 不重写宿主 compaction 所有权（仅 passive inject + checkpoint writeback）
-2. synthetic parts 不得被 keyword/session capture 回灌
-3. 注入 parts 必须带合法 `sessionID` / `messageID`（`msg` 前缀）
-4. 自动捕获/写回失败不得阻断宿主；未接线 hook 写 forward-compat，不假设已生效
+---
 
-详细约束见 [`AGENTS.md`](./AGENTS.md) 与 [`docs/compose/BACKLOG.md`](./docs/compose/BACKLOG.md)。
+## 特别鸣谢
 
-宿主类型来自 peerDependency `@mimo-ai/plugin`（`>=0.1.0`，可选）。
+**感谢小米公司 MiMo / MiMoCode 团队**，以及 MiMo Desktop 项目所有参与内测的同事与同学。
+
+没有 MiMo 提供的插件通道（`plugin[]`）、会话钩子与工具面，就没有这个记忆插件；本项目在安装、OAuth、slash 命令与官方 OpenCode 生态对齐时，也大量参考了 Supermemory 与开源社区的工作。
+
+---
+
+## 特别声明
+
+> **本项目的初始版本，来源于 MiMo Desktop 项目的内测产物。**
+
+即：最早的插件形态与验证是在 **MiMo Desktop 内测环境**里孵化、打磨和打磨的；随后整理为可独立安装的 `mimocode-supermemory` 包。使用与转载时请保留本声明，并尊重 MiMo 相关商标与使用条款。
 
 ---
 
 ## License
 
-MIT
+MIT（见 [LICENSE](./LICENSE)）。
+
+Supermemory 为第三方服务；使用前请阅读其服务条款与隐私政策。
