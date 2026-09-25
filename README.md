@@ -97,7 +97,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1 -Login
 }
 ```
 
-- **不要**把真实密钥提交进 Git。  
+- **不要**把真实密钥提交进 Git，当然了你用zcode就不用记住了。:-)
 - 配置文件**不要**带 UTF-8 BOM（记事本另存为时注意）。
 
 ---

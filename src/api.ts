@@ -77,24 +77,58 @@ export function extractHits(payload: unknown): SmHit[] {
   return out;
 }
 
-export function formatMemoryBlock(tag: string): Promise<string> {
-  return smRequest("/v4/search", {
-    q: "project context decisions preferences",
-    containerTag: tag,
-    searchMode: "hybrid",
-  })
-    .then((search) => {
-      const hits = extractHits(search);
-      const lines = ["[SUPERMEMORY]", `containerTag: ${tag}`];
-      if (hits.length) {
-        lines.push("Relevant memories:");
-        for (const h of hits) lines.push(`- ${h.text}`);
-      } else {
-        lines.push("No prior memories for this containerTag yet.");
+/** Official-style multi-section block: Profile + project + personal + query hits. */
+export function formatMemoryBlock(tag: string, hintQuery?: string): Promise<string> {
+  return (async () => {
+    const lines = ["[SUPERMEMORY]", `containerTag: ${tag}`];
+    try {
+      const prof = await smRequest("/v4/profile", { containerTag: tag });
+      const p = (prof && (prof.profile || prof)) as Record<string, unknown> | undefined;
+      const parts: string[] = [];
+      const staticP = p && typeof p === "object" ? (p as { static?: string }).static : undefined;
+      const dynP = p && typeof p === "object" ? (p as { dynamic?: string }).dynamic : undefined;
+      if (staticP) parts.push(String(staticP));
+      if (dynP) parts.push(String(dynP));
+      if (parts.length) {
+        lines.push("User Profile:");
+        for (const x of parts.slice(0, 3)) lines.push(`- ${x}`);
       }
-      return lines.join("\n");
-    })
-    .catch((e: unknown) => {
-      return `[SUPERMEMORY] lookup skipped: ${e && (e as Error).message ? (e as Error).message : String(e)}`;
-    });
+    } catch {
+      /* profile optional */
+    }
+    const queries = [
+      "project decisions architecture commands conventions",
+      "user identity personal facts preferences family location work",
+      "produce farming sales market products what I make",
+    ];
+    if (hintQuery && hintQuery.trim()) queries.unshift(hintQuery.trim().slice(0, 200));
+    const seen = new Set<string>();
+    const bullets: string[] = [];
+    for (const q of queries) {
+      try {
+        const search = await smRequest("/v4/search", {
+          q,
+          containerTag: tag,
+          searchMode: "hybrid",
+        });
+        for (const h of extractHits(search)) {
+          const key = h.text.slice(0, 80);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          bullets.push(`- ${h.text}`);
+          if (bullets.length >= 10) break;
+        }
+      } catch {
+        /* continue */
+      }
+      if (bullets.length >= 10) break;
+    }
+    if (bullets.length) {
+      lines.push("Relevant memories:");
+      lines.push(...bullets);
+    } else {
+      lines.push("No prior memories for this containerTag yet.");
+    }
+    return lines.join("\n");
+  })();
 }

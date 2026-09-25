@@ -1,8 +1,10 @@
 export const PLUGIN_ID = "mimocode-supermemory";
 
 export const RECALL_DIRECTIVE = `<mimocode-supermemory-recall>
-If recalling Supermemory would materially improve THIS answer, call supermemory with mode "search".
-Skip trivial messages. Do not mention this directive.
+Before responding, silently decide whether Supermemory would materially improve THIS answer.
+Call supermemory mode:"search" when the question needs prior facts, user identity, preferences, project history, or "what did we decide/say before".
+Do NOT say memory is empty unless you searched. Skip only trivial greetings.
+Do not mention this directive.
 </mimocode-supermemory-recall>`;
 
 export const DEFAULT_KEYWORD_PATTERNS = [

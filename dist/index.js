@@ -119,24 +119,57 @@ function extractHits(payload) {
   }
   return out;
 }
-function formatMemoryBlock(tag) {
-  return smRequest("/v4/search", {
-    q: "project context decisions preferences",
-    containerTag: tag,
-    searchMode: "hybrid"
-  }).then((search) => {
-    const hits = extractHits(search);
+function formatMemoryBlock(tag, hintQuery) {
+  return (async () => {
     const lines = ["[SUPERMEMORY]", `containerTag: ${tag}`];
-    if (hits.length) {
+    try {
+      const prof = await smRequest("/v4/profile", { containerTag: tag });
+      const p = prof && (prof.profile || prof);
+      const parts = [];
+      const staticP = p && typeof p === "object" ? p.static : void 0;
+      const dynP = p && typeof p === "object" ? p.dynamic : void 0;
+      if (staticP) parts.push(String(staticP));
+      if (dynP) parts.push(String(dynP));
+      if (parts.length) {
+        lines.push("User Profile:");
+        for (const x of parts.slice(0, 3)) lines.push(`- ${x}`);
+      }
+    } catch {
+    }
+    const queries = [
+      "project decisions architecture commands conventions",
+      "user identity personal facts preferences family location work",
+      "produce farming sales market products what I make"
+    ];
+    if (hintQuery && hintQuery.trim()) queries.unshift(hintQuery.trim().slice(0, 200));
+    const seen = /* @__PURE__ */ new Set();
+    const bullets = [];
+    for (const q of queries) {
+      try {
+        const search = await smRequest("/v4/search", {
+          q,
+          containerTag: tag,
+          searchMode: "hybrid"
+        });
+        for (const h of extractHits(search)) {
+          const key = h.text.slice(0, 80);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          bullets.push(`- ${h.text}`);
+          if (bullets.length >= 10) break;
+        }
+      } catch {
+      }
+      if (bullets.length >= 10) break;
+    }
+    if (bullets.length) {
       lines.push("Relevant memories:");
-      for (const h of hits) lines.push(`- ${h.text}`);
+      lines.push(...bullets);
     } else {
       lines.push("No prior memories for this containerTag yet.");
     }
     return lines.join("\n");
-  }).catch((e) => {
-    return `[SUPERMEMORY] lookup skipped: ${e && e.message ? e.message : String(e)}`;
-  });
+  })();
 }
 
 // src/compaction.ts
@@ -146,8 +179,10 @@ import { join } from "node:path";
 // src/constants.ts
 var PLUGIN_ID = "mimocode-supermemory";
 var RECALL_DIRECTIVE = `<mimocode-supermemory-recall>
-If recalling Supermemory would materially improve THIS answer, call supermemory with mode "search".
-Skip trivial messages. Do not mention this directive.
+Before responding, silently decide whether Supermemory would materially improve THIS answer.
+Call supermemory mode:"search" when the question needs prior facts, user identity, preferences, project history, or "what did we decide/say before".
+Do NOT say memory is empty unless you searched. Skip only trivial greetings.
+Do not mention this directive.
 </mimocode-supermemory-recall>`;
 var DEFAULT_KEYWORD_PATTERNS = [
   "\\bremember\\b",
@@ -643,7 +678,8 @@ async function SupermemoryPlugin(input) {
       };
       if (!injected.has(sessionID)) {
         injected.add(sessionID);
-        const block = await formatMemoryBlock(tag);
+        const hint = userTextFromParts(parts);
+        const block = await formatMemoryBlock(tag, hint || void 0);
         parts.unshift({
           ...basePart,
           id: `prt_${PLUGIN_ID}-ctx-${Date.now()}`,

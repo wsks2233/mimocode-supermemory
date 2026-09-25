@@ -92,7 +92,8 @@ export async function SupermemoryPlugin(input?: {
       };
       if (!injected.has(sessionID)) {
         injected.add(sessionID);
-        const block = await formatMemoryBlock(tag);
+        const hint = userTextFromParts(parts);
+        const block = await formatMemoryBlock(tag, hint || undefined);
         parts.unshift({
           ...basePart,
           id: `prt_${PLUGIN_ID}-ctx-${Date.now()}`,
