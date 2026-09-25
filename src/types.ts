@@ -3,6 +3,9 @@ export type TagInfo = {
   source: string;
   origin: string | null;
   projectName: string;
+  personalReads?: string[];
+  projectReads?: string[];
+  allReads?: string[];
 };
 
 export type SupermemoryToolArgs = {
@@ -10,6 +13,8 @@ export type SupermemoryToolArgs = {
   query?: string;
   content?: string;
   id?: string;
+  memoryId?: string;
+  type?: string;
   scope?: string;
 };
 

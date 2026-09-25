@@ -1,5 +1,5 @@
 // src/plugin.ts
-import { appendFileSync as appendFileSync2, existsSync as existsSync4, mkdirSync as mkdirSync2 } from "node:fs";
+import { appendFileSync as appendFileSync2, existsSync as existsSync5, mkdirSync as mkdirSync2 } from "node:fs";
 
 // src/config.ts
 import { existsSync, readFileSync } from "node:fs";
@@ -195,8 +195,8 @@ function formatMemoryBlock(tag, hintQuery) {
 }
 
 // src/compaction.ts
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "node:fs";
-import { join } from "node:path";
+import { existsSync as existsSync3, readFileSync as readFileSync3 } from "node:fs";
+import { join as join2 } from "node:path";
 
 // src/constants.ts
 var PLUGIN_ID = "mimocode-supermemory";
@@ -239,82 +239,340 @@ var DEFAULT_KEYWORD_PATTERNS = [
 ];
 
 // src/tags.ts
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-function safeName(raw) {
-  const name = String(raw || "").split(/[\\/]/).filter(Boolean).pop();
-  const cleaned = (name || "").replace(/[^a-zA-Z0-9_-]/g, "_");
-  if (!cleaned || /^_+$/.test(cleaned)) return "";
-  return cleaned;
+import { execSync } from "node:child_process";
+import { existsSync as existsSync2, readFileSync as readFileSync2, realpathSync } from "node:fs";
+import { hostname, homedir, userInfo } from "node:os";
+import { basename, dirname, join, resolve, sep } from "node:path";
+function getTagConfig() {
+  const f = loadFileConfig();
+  return {
+    containerTagPrefix: String(f.containerTagPrefix || "opencode"),
+    userContainerTag: f.userContainerTag,
+    projectContainerTag: f.projectContainerTag
+  };
 }
-function containerTagSync(directory, fileConfig) {
-  const file = fileConfig ?? loadFileConfig();
-  if (file.projectContainerTag && String(file.projectContainerTag).trim()) {
-    return String(file.projectContainerTag).trim();
-  }
-  const raw = directory || process.cwd() || "";
-  const name = safeName(raw);
-  if (name) return `repo_${name}__local`;
-  const path = String(raw || "project");
-  let h = 0;
-  for (let i = 0; i < path.length; i++) {
-    h = Math.imul(31, h) + path.charCodeAt(i) | 0;
-  }
-  return `repo_path_${Math.abs(h).toString(16)}__local`;
+var CONFIG = getTagConfig();
+function sha256(input) {
+  return createHash("sha256").update(input).digest("hex").slice(0, 16);
 }
-function normalizeOrigin(url) {
-  if (!url) return "";
-  let u = String(url).trim().toLowerCase();
-  u = u.replace(/\.git$/, "").replace(/\/$/, "");
-  u = u.replace(/^git@([^:]+):/, "$1/");
-  u = u.replace(/^ssh:\/\//, "").replace(/^https?:\/\//, "");
-  return u;
+var repoInfoCache = /* @__PURE__ */ new Map();
+function getGitRoot(directory) {
+  const isolateWorktrees = process.env.SUPERMEMORY_ISOLATE_WORKTREES === "true";
+  try {
+    if (isolateWorktrees) {
+      const gitRoot2 = execSync("git rev-parse --show-toplevel", {
+        cwd: directory,
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"]
+      }).trim();
+      return gitRoot2 || null;
+    }
+    const gitCommonDir = execSync("git rev-parse --git-common-dir", {
+      cwd: directory,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"]
+    }).trim();
+    if (gitCommonDir === ".git") {
+      const gitRoot2 = execSync("git rev-parse --show-toplevel", {
+        cwd: directory,
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"]
+      }).trim();
+      return gitRoot2 || null;
+    }
+    const resolved = resolve(directory, gitCommonDir);
+    if (basename(resolved) === ".git" && !resolved.includes(`${sep}.git${sep}`)) {
+      return dirname(resolved);
+    }
+    const gitRoot = execSync("git rev-parse --show-toplevel", {
+      cwd: directory,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"]
+    }).trim();
+    return gitRoot || null;
+  } catch {
+    return null;
+  }
+}
+function getProjectBasePath(directory) {
+  return getGitRoot(directory) || resolve(directory);
+}
+function getGitEmail(directory) {
+  try {
+    const email = execSync("git config user.email", {
+      cwd: getProjectBasePath(directory),
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"]
+    }).trim();
+    return email || null;
+  } catch {
+    return null;
+  }
+}
+function normalizeGitRemote(remoteUrl) {
+  const raw = remoteUrl.trim();
+  if (!raw) return null;
+  let normalized;
+  if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
+    try {
+      const parsed = new URL(raw);
+      normalized = parsed.protocol === "file:" ? `file:${decodeURIComponent(parsed.pathname)}` : `${parsed.hostname.toLowerCase()}${parsed.port ? `:${parsed.port}` : ""}/${parsed.pathname.replace(/^\/+/, "")}`;
+    } catch {
+      normalized = raw;
+    }
+  } else {
+    const scpStyle = raw.match(/^(?:[^@/]+@)?([^:]+):(.+)$/);
+    normalized = scpStyle?.[1] && scpStyle[2] ? `${scpStyle[1].toLowerCase()}/${scpStyle[2]}` : `file:${resolve(raw)}`;
+  }
+  return normalized.replace(/[?#].*$/, "").replace(/\/+$/, "").replace(/\.git$/i, "").replace(/\/{2,}/g, "/").toLowerCase();
+}
+function getGitRepoInfo(directory) {
+  const cached = repoInfoCache.get(directory);
+  if (cached) return cached;
+  try {
+    const remoteUrl = execSync("git remote get-url origin", {
+      cwd: directory,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"]
+    }).trim();
+    const normalizedRemote = normalizeGitRemote(remoteUrl);
+    const displayRemote = remoteUrl.replace(/\/+$/, "").replace(/\.git$/i, "");
+    const separator = Math.max(
+      displayRemote.lastIndexOf("/"),
+      displayRemote.lastIndexOf(":")
+    );
+    const result = {
+      name: displayRemote.slice(separator + 1) || null,
+      normalizedRemote
+    };
+    repoInfoCache.set(directory, result);
+    return result;
+  } catch {
+    const result = { name: null, normalizedRemote: null };
+    repoInfoCache.set(directory, result);
+    return result;
+  }
+}
+function getGitRepoName(directory) {
+  return getGitRepoInfo(directory).name;
+}
+function loadClaudeProjectConfig(directory) {
+  try {
+    const configPath = join(
+      getProjectBasePath(directory),
+      ".claude",
+      ".supermemory-claude",
+      "config.json"
+    );
+    if (!existsSync2(configPath)) return null;
+    return JSON.parse(readFileSync2(configPath, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+function loadCodexConfig() {
+  try {
+    const configPath = join(homedir(), ".codex", "supermemory.json");
+    if (!existsSync2(configPath)) return null;
+    return JSON.parse(readFileSync2(configPath, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+function loadLegacyCursorConfig(directory) {
+  let globalConfig = null;
+  try {
+    const configPath = join(
+      homedir(),
+      ".config",
+      "cursor",
+      "supermemory.json"
+    );
+    if (existsSync2(configPath)) {
+      globalConfig = JSON.parse(readFileSync2(configPath, "utf-8"));
+    }
+  } catch {
+  }
+  let projectConfig = null;
+  let current = resolve(directory);
+  while (true) {
+    try {
+      const configPath = join(
+        current,
+        ".cursor",
+        ".supermemory",
+        "config.json"
+      );
+      if (existsSync2(configPath)) {
+        projectConfig = JSON.parse(readFileSync2(configPath, "utf-8"));
+        break;
+      }
+    } catch {
+    }
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return { ...globalConfig ?? {}, ...projectConfig ?? {} };
+}
+function sanitizeRepoName(name) {
+  const sanitized = name.toLowerCase().replace(/[^a-z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
+  return sanitized.slice(0, 95).replace(/_+$/g, "") || "unknown";
+}
+function getProjectIdentity(directory) {
+  const basePath = getProjectBasePath(directory);
+  const { normalizedRemote } = getGitRepoInfo(basePath);
+  const isolateWorktrees = process.env.SUPERMEMORY_ISOLATE_WORKTREES === "true";
+  let localIdentity = basePath;
+  try {
+    localIdentity = realpathSync.native(basePath);
+  } catch {
+  }
+  return sha256(
+    !isolateWorktrees && normalizedRemote ? normalizedRemote : `path:${localIdentity}`
+  );
+}
+function getGeneratedProjectTag(directory) {
+  const basePath = getProjectBasePath(directory);
+  const repoName = getGitRepoName(basePath) || basename(basePath) || "unknown";
+  const shortName = sanitizeRepoName(repoName).slice(0, 72).replace(/_+$/g, "");
+  return `repo_${shortName || "unknown"}__${getProjectIdentity(directory)}`;
+}
+function getLegacyGeneratedProjectTag(directory) {
+  const basePath = getProjectBasePath(directory);
+  const repoName = getGitRepoName(basePath) || basename(basePath) || "unknown";
+  return `repo_${sanitizeRepoName(repoName)}`;
+}
+function getProjectTag(directory) {
+  return loadClaudeProjectConfig(directory)?.repoContainerTag || process.env.SUPERMEMORY_REPO_TAG || loadLegacyCursorConfig(directory).repoContainerTag || CONFIG.projectContainerTag || loadCodexConfig()?.projectContainerTag || getGeneratedProjectTag(directory);
+}
+function getProjectName(directory) {
+  const basePath = getProjectBasePath(directory);
+  return getGitRepoName(basePath) || basename(basePath) || "unknown";
+}
+function getLegacyClaudePersonalTags(directory) {
+  const projectHash = sha256(getProjectBasePath(directory));
+  const claudeConfig = loadClaudeProjectConfig(directory);
+  return uniqueTags([
+    claudeConfig?.personalContainerTag,
+    `user_project_${projectHash}`,
+    `claudecode_project_${projectHash}`
+  ]);
+}
+function getLegacyCodexUserTags(directory) {
+  const config = loadCodexConfig();
+  const identity = getGitEmail(directory) || process.env.USER || process.env.USERNAME || hostname();
+  const hash = sha256(identity);
+  return uniqueTags([
+    config?.userContainerTag,
+    `${config?.containerTagPrefix || "codex"}_user_${hash}`,
+    `codex_user_${hash}`
+  ]);
+}
+function getLegacyCodexProjectTags(directory) {
+  const config = loadCodexConfig();
+  const projectHash = sha256(getProjectBasePath(directory));
+  return uniqueTags([
+    config?.projectContainerTag,
+    `${config?.containerTagPrefix || "codex"}_project_${projectHash}`,
+    `codex_project_${projectHash}`
+  ]);
+}
+function getLegacyOpenCodeUserTags(directory) {
+  const identity = getGitEmail(directory) || process.env.USER || process.env.USERNAME || "anonymous";
+  const hash = sha256(identity);
+  return uniqueTags([
+    CONFIG.userContainerTag,
+    `${CONFIG.containerTagPrefix}_user_${hash}`,
+    `opencode_user_${hash}`
+  ]);
+}
+function getLegacyOpenCodeProjectTags(directory) {
+  const directoryHashes = uniqueTags([
+    sha256(directory),
+    sha256(resolve(directory)),
+    sha256(getProjectBasePath(directory))
+  ]);
+  return uniqueTags([
+    CONFIG.projectContainerTag,
+    ...directoryHashes.flatMap((hash) => [
+      `${CONFIG.containerTagPrefix}_project_${hash}`,
+      `opencode_project_${hash}`
+    ])
+  ]);
+}
+function getLegacyCursorUserTags(directory) {
+  const config = loadLegacyCursorConfig(directory);
+  const identity = config.userContainerTag || process.env.SUPERMEMORY_USER_TAG || process.env.CURSOR_USER_EMAIL || getGitEmail(directory) || `${hostname()}_${userInfo().username}`;
+  return [`cursor_user_${sha256(identity)}`];
+}
+function getLegacyCursorProjectTags(directory) {
+  const config = loadLegacyCursorConfig(directory);
+  const identity = config.projectContainerTag || process.env.SUPERMEMORY_PROJECT_TAG || getProjectBasePath(directory);
+  return [`cursor_project_${sha256(identity)}`];
+}
+function uniqueTags(tags) {
+  return [
+    ...new Set(
+      tags.filter(
+        (tag) => typeof tag === "string" && tag.trim().length > 0
+      )
+    )
+  ];
+}
+function getPersonalReadTags(directory) {
+  return uniqueTags([
+    getProjectTag(directory),
+    getGeneratedProjectTag(directory),
+    ...getLegacyClaudePersonalTags(directory),
+    ...getLegacyCodexUserTags(directory),
+    ...getLegacyOpenCodeUserTags(directory),
+    ...getLegacyCursorUserTags(directory)
+  ]);
+}
+function getProjectReadTags(directory) {
+  return uniqueTags([
+    getProjectTag(directory),
+    getGeneratedProjectTag(directory),
+    getLegacyGeneratedProjectTag(directory),
+    ...getLegacyCodexProjectTags(directory),
+    ...getLegacyOpenCodeProjectTags(directory),
+    ...getLegacyCursorProjectTags(directory)
+  ]);
+}
+function getAllReadTags(directory) {
+  return uniqueTags([
+    ...getPersonalReadTags(directory),
+    ...getProjectReadTags(directory)
+  ]);
+}
+function getTags(directory) {
+  const canonical = getProjectTag(directory);
+  return {
+    canonical,
+    user: canonical,
+    project: canonical,
+    projectId: getProjectIdentity(directory),
+    projectName: getProjectName(directory),
+    personalReads: getPersonalReadTags(directory),
+    projectReads: getProjectReadTags(directory),
+    allReads: getAllReadTags(directory)
+  };
 }
 function sha12(input) {
-  return createHash("sha256").update(String(input)).digest("hex").slice(0, 12);
+  return sha256(input).slice(0, 12);
 }
-function gitExec(directory, args) {
-  try {
-    return String(
-      execFileSync("git", ["-C", String(directory || process.cwd()), ...args], {
-        encoding: "utf8",
-        timeout: 4e3,
-        stdio: ["ignore", "pipe", "ignore"]
-      }) || ""
-    ).trim();
-  } catch {
-    return "";
-  }
-}
-async function resolveContainerTag(directory, fileConfig) {
-  const file = fileConfig ?? loadFileConfig();
-  const dir = directory || process.cwd();
-  const pinned = file.projectContainerTag && String(file.projectContainerTag).trim();
-  if (pinned) {
-    return {
-      canonical: pinned,
-      source: "config:projectContainerTag",
-      origin: null,
-      projectName: safeName(dir) || "project"
-    };
-  }
-  const root = gitExec(dir, ["rev-parse", "--show-toplevel"]) || dir;
-  const originRaw = gitExec(dir, ["remote", "get-url", "origin"]);
-  const name = safeName(root) || safeName(dir) || "project";
-  if (originRaw) {
-    const origin = normalizeOrigin(originRaw);
-    return {
-      canonical: `repo_${name}__${sha12(origin)}`,
-      source: "git-origin",
-      origin,
-      projectName: name
-    };
-  }
+async function resolveContainerTag(directory) {
+  const g = getTags(directory || process.cwd());
   return {
-    canonical: containerTagSync(dir),
-    source: "basename-or-path",
+    canonical: g.canonical,
+    source: "official-getTags",
     origin: null,
-    projectName: name
+    projectName: g.projectName,
+    personalReads: g.personalReads,
+    projectReads: g.projectReads,
+    allReads: g.allReads
   };
 }
 
@@ -336,18 +594,18 @@ function checkpointCandidates(sessionID) {
   );
   const out = [];
   for (const home of homes) {
-    const base = process.env.MIMOCODE_HOME ? home : join(home, ".local", "share", "mimocode");
-    out.push(join(base, "sessions", sessionID, "checkpoint.md"));
-    out.push(join(home, ".local", "share", "mimocode", "sessions", sessionID, "checkpoint.md"));
-    out.push(join(home, ".local", "share", "mimocode", "sessions", sessionID, "notes.md"));
+    const base = process.env.MIMOCODE_HOME ? home : join2(home, ".local", "share", "mimocode");
+    out.push(join2(base, "sessions", sessionID, "checkpoint.md"));
+    out.push(join2(home, ".local", "share", "mimocode", "sessions", sessionID, "checkpoint.md"));
+    out.push(join2(home, ".local", "share", "mimocode", "sessions", sessionID, "notes.md"));
   }
   return out;
 }
 function readHostCheckpoint(sessionID) {
   for (const path of checkpointCandidates(sessionID)) {
     try {
-      if (!existsSync2(path)) continue;
-      const text = readFileSync2(path, "utf8").trim();
+      if (!existsSync3(path)) continue;
+      const text = readFileSync3(path, "utf8").trim();
       if (text) return text;
     } catch {
     }
@@ -395,8 +653,8 @@ ${checkpoint}`.slice(0, 12e3);
     try {
       const home = process.env.USERPROFILE || process.env.HOME || "";
       const pdir = `${home}\\sm-hook-proof`;
-      const { appendFileSync: appendFileSync3, existsSync: existsSync5, mkdirSync: mkdirSync3 } = await import("node:fs");
-      if (!existsSync5(pdir)) mkdirSync3(pdir, { recursive: true });
+      const { appendFileSync: appendFileSync3, existsSync: existsSync6, mkdirSync: mkdirSync3 } = await import("node:fs");
+      if (!existsSync6(pdir)) mkdirSync3(pdir, { recursive: true });
       appendFileSync3(
         `${pdir}\\compaction.log`,
         `${(/* @__PURE__ */ new Date()).toISOString()} session=${sessionID} tag=${tagInfo.canonical} wrote=host-checkpoint bytes=${body.length}
@@ -411,7 +669,42 @@ ${checkpoint}`.slice(0, 12e3);
 }
 
 // src/keyword.ts
-import { appendFileSync, existsSync as existsSync3, mkdirSync } from "node:fs";
+import { appendFileSync, existsSync as existsSync4, mkdirSync } from "node:fs";
+
+// src/entity-context.ts
+var AGENT_ENTITY_CONTEXT = `Shared coding-agent memory for one software repository.
+
+RULES:
+- Remember what a human teammate would remember: decisions, lessons, preferences, and durable project knowledge
+- Preserve context that helps Claude Code, Codex, OpenCode, or Cursor continue the work later
+- Condense assistant responses into decisions, outcomes, and reusable knowledge
+- Keep user preferences and project facts concise and independently understandable
+- Prefer why a choice was made and what was learned over mechanical progress updates
+
+EXTRACT:
+- User preferences, accepted decisions, durable workflows, outcomes, and lessons learned
+- Architecture: "uses monorepo with turborepo", "API in /apps/api"
+- Conventions: "components in PascalCase", "hooks prefixed with use"
+- Patterns: "all API routes use withAuth wrapper", "errors thrown as ApiError"
+- Setup: "requires .env with DATABASE_URL", "run pnpm db:migrate first"
+- Decisions: "chose Drizzle over Prisma for performance", "using RSC for data fetching"
+
+SKIP:
+- Generic assistant suggestions the user did not accept
+- Transient repository state Git already tracks: current branch or commit, uncommitted files and diffs, and in-flight commit, push, or PR status
+- Transient command output and low-value implementation chatter
+- Granular details that do not help future work`;
+
+// src/privacy.ts
+function stripPrivateContent(content) {
+  return content.replace(/<private>[\s\S]*?<\/private>/gi, "[REDACTED]");
+}
+function isFullyPrivate(content) {
+  const stripped = stripPrivateContent(content).trim();
+  return stripped === "[REDACTED]" || stripped === "";
+}
+
+// src/keyword.ts
 var keywordSeen = /* @__PURE__ */ new Set();
 function keywordRegexes() {
   const list = [...DEFAULT_KEYWORD_PATTERNS, ...keywordPatternStrings()];
@@ -444,8 +737,9 @@ function extractRememberContent(text) {
 async function keywordCapture(userText, tagInfo) {
   if (!apiKey() || !autoInjectEnabled()) return;
   if (!matchKeyword(userText)) return;
-  const content = extractRememberContent(userText);
-  if (!content) return;
+  let content = extractRememberContent(userText);
+  if (!content || isFullyPrivate(content)) return;
+  content = stripPrivateContent(content);
   const sid = `${PLUGIN_ID}:kw:${tagInfo.canonical}:${sha12(content)}`;
   if (keywordSeen.has(sid)) return;
   keywordSeen.add(sid);
@@ -454,6 +748,7 @@ async function keywordCapture(userText, tagInfo) {
       content,
       containerTag: tagInfo.canonical,
       taskType: "memory",
+      entityContext: AGENT_ENTITY_CONTEXT,
       sm_capture_mode: "keyword",
       sm_scope: "project",
       project: tagInfo.projectName
@@ -461,7 +756,7 @@ async function keywordCapture(userText, tagInfo) {
     try {
       const home = process.env.USERPROFILE || process.env.HOME || "";
       const pdir = `${home}\\sm-hook-proof`;
-      if (!existsSync3(pdir)) mkdirSync(pdir, { recursive: true });
+      if (!existsSync4(pdir)) mkdirSync(pdir, { recursive: true });
       appendFileSync(
         `${pdir}\\keyword.log`,
         `${(/* @__PURE__ */ new Date()).toISOString()} tag=${tagInfo.canonical} content=${content.slice(0, 200)}
@@ -617,12 +912,17 @@ async function executeSupermemory(args, tagInfo) {
       return ok({ success: true, profile: data });
     }
     if (mode === "add") {
-      const content = args.content;
+      let content = args.content;
       if (!content) return ok({ success: false, error: "content required" });
+      if (isFullyPrivate(content)) {
+        return ok({ success: false, error: "Cannot store fully private content" });
+      }
+      content = stripPrivateContent(content);
       const data = await smRequest("/v3/documents", {
         content,
         containerTag: tag,
         taskType: "memory",
+        entityContext: AGENT_ENTITY_CONTEXT,
         sm_scope: scope,
         sm_capture_mode: "tool",
         project: tagInfo.projectName
@@ -638,7 +938,7 @@ async function executeSupermemory(args, tagInfo) {
       });
     }
     if (mode === "forget") {
-      const id = args.id;
+      const id = args.id || args.memoryId;
       const content = args.content;
       const q = args.query;
       if (!id && !content && !q) {
@@ -732,6 +1032,19 @@ function createSupermemoryTool(tagInfo, directory) {
           description: "Content for add, or exact content to forget"
         },
         id: { type: "string", description: "Memory/document id for mode=forget" },
+        memoryId: { type: "string", description: "Official alias of id for forget" },
+        type: {
+          type: "string",
+          enum: [
+            "project-config",
+            "architecture",
+            "error-solution",
+            "preference",
+            "learned-pattern",
+            "conversation"
+          ],
+          description: "Memory category (stored in content metadata)"
+        },
         scope: {
           type: "string",
           enum: ["user", "project"],
@@ -764,7 +1077,7 @@ function writeProofTag(tagInfo, directory) {
   try {
     const home = process.env.USERPROFILE || process.env.HOME || "";
     const dir = `${home}\\sm-hook-proof`;
-    if (!existsSync4(dir)) mkdirSync2(dir, { recursive: true });
+    if (!existsSync5(dir)) mkdirSync2(dir, { recursive: true });
     appendFileSync2(
       `${dir}\\tag.log`,
       `${(/* @__PURE__ */ new Date()).toISOString()} dir=${directory} tag=${tagInfo.canonical} source=${tagInfo.source} origin=${tagInfo.origin || "-"}
@@ -907,8 +1220,9 @@ async function SupermemoryPlugin(input) {
             lines.push(role + ": " + msg.content.trim());
           }
         }
-        const body = lines.join("\n\n").slice(0, 12e3);
-        if (!body.trim()) return;
+        const bodyRaw = lines.join("\n\n").slice(0, 12e3);
+        if (!bodyRaw.trim() || isFullyPrivate(bodyRaw)) return;
+        const body = stripPrivateContent(bodyRaw);
         const capId = `${PLUGIN_ID}:capture:${sessionID}:${turn}`;
         if (captureSeen.has(capId)) return;
         captureSeen.add(capId);
@@ -916,6 +1230,7 @@ async function SupermemoryPlugin(input) {
           content: body,
           containerTag: tag,
           taskType: "memory",
+          entityContext: AGENT_ENTITY_CONTEXT,
           sm_scope: "project",
           sm_capture_mode: "automatic",
           project: tagInfo.projectName

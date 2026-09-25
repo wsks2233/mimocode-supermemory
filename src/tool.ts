@@ -1,6 +1,8 @@
 import { baseUrl, apiKey } from "./config.js";
 import { extractHits, smRequest } from "./api.js";
 import { PLUGIN_ID } from "./constants.js";
+import { AGENT_ENTITY_CONTEXT } from "./entity-context.js";
+import { isFullyPrivate, stripPrivateContent } from "./privacy.js";
 import type { SupermemoryToolArgs, TagInfo } from "./types.js";
 
 export async function executeSupermemory(
@@ -45,12 +47,17 @@ export async function executeSupermemory(
       return ok({ success: true, profile: data });
     }
     if (mode === "add") {
-      const content = args.content;
+      let content = args.content;
       if (!content) return ok({ success: false, error: "content required" });
+      if (isFullyPrivate(content)) {
+        return ok({ success: false, error: "Cannot store fully private content" });
+      }
+      content = stripPrivateContent(content);
       const data = await smRequest("/v3/documents", {
         content,
         containerTag: tag,
         taskType: "memory",
+        entityContext: AGENT_ENTITY_CONTEXT,
         sm_scope: scope,
         sm_capture_mode: "tool",
         project: tagInfo.projectName,
@@ -66,7 +73,7 @@ export async function executeSupermemory(
       });
     }
     if (mode === "forget") {
-      const id = args.id;
+      const id = args.id || args.memoryId;
       const content = args.content;
       const q = args.query;
       if (!id && !content && !q) {
@@ -162,6 +169,19 @@ export function createSupermemoryTool(tagInfo: TagInfo, directory: string) {
           description: "Content for add, or exact content to forget",
         },
         id: { type: "string", description: "Memory/document id for mode=forget" },
+        memoryId: { type: "string", description: "Official alias of id for forget" },
+        type: {
+          type: "string",
+          enum: [
+            "project-config",
+            "architecture",
+            "error-solution",
+            "preference",
+            "learned-pattern",
+            "conversation",
+          ],
+          description: "Memory category (stored in content metadata)",
+        },
         scope: {
           type: "string",
           enum: ["user", "project"],

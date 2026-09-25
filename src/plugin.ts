@@ -10,6 +10,8 @@ import {
 import { MEMORY_NUDGE_MESSAGE, PLUGIN_ID, RECALL_DIRECTIVE } from "./constants.js";
 import { keywordCapture, matchKeyword, userTextFromParts } from "./keyword.js";
 import { buildDirectRecallResult, RecallSessionCache } from "./recall.js";
+import { AGENT_ENTITY_CONTEXT } from "./entity-context.js";
+import { isFullyPrivate, stripPrivateContent } from "./privacy.js";
 import { createSupermemoryTool } from "./tool.js";
 import { resolveContainerTag } from "./tags.js";
 import type { TagInfo } from "./types.js";
@@ -220,8 +222,9 @@ export async function SupermemoryPlugin(input?: {
             lines.push(role + ": " + msg.content.trim());
           }
         }
-        const body = lines.join("\n\n").slice(0, 12000);
-        if (!body.trim()) return;
+        const bodyRaw = lines.join("\n\n").slice(0, 12000);
+        if (!bodyRaw.trim() || isFullyPrivate(bodyRaw)) return;
+        const body = stripPrivateContent(bodyRaw);
         const capId = `${PLUGIN_ID}:capture:${sessionID}:${turn}`;
         if (captureSeen.has(capId)) return;
         captureSeen.add(capId);
@@ -229,6 +232,7 @@ export async function SupermemoryPlugin(input?: {
           content: body,
           containerTag: tag,
           taskType: "memory",
+          entityContext: AGENT_ENTITY_CONTEXT,
           sm_scope: "project",
           sm_capture_mode: "automatic",
           project: tagInfo.projectName,

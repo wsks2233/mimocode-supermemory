@@ -3,6 +3,8 @@ import { DEFAULT_KEYWORD_PATTERNS, PLUGIN_ID } from "./constants.js";
 import { apiKey, autoInjectEnabled, keywordPatternStrings } from "./config.js";
 import { smRequest } from "./api.js";
 import { sha12 } from "./tags.js";
+import { AGENT_ENTITY_CONTEXT } from "./entity-context.js";
+import { isFullyPrivate, stripPrivateContent } from "./privacy.js";
 import type { TagInfo } from "./types.js";
 
 const keywordSeen = new Set<string>();
@@ -45,8 +47,9 @@ export function extractRememberContent(text: string): string {
 export async function keywordCapture(userText: string, tagInfo: TagInfo): Promise<void> {
   if (!apiKey() || !autoInjectEnabled()) return;
   if (!matchKeyword(userText)) return;
-  const content = extractRememberContent(userText);
-  if (!content) return;
+  let content = extractRememberContent(userText);
+  if (!content || isFullyPrivate(content)) return;
+  content = stripPrivateContent(content);
   const sid = `${PLUGIN_ID}:kw:${tagInfo.canonical}:${sha12(content)}`;
   if (keywordSeen.has(sid)) return;
   keywordSeen.add(sid);
@@ -55,6 +58,7 @@ export async function keywordCapture(userText: string, tagInfo: TagInfo): Promis
       content,
       containerTag: tagInfo.canonical,
       taskType: "memory",
+      entityContext: AGENT_ENTITY_CONTEXT,
       sm_capture_mode: "keyword",
       sm_scope: "project",
       project: tagInfo.projectName,

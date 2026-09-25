@@ -51,16 +51,11 @@ expect(help.plugin === "mimocode-supermemory", `help.plugin=${help.plugin}`);
 expect(typeof help.containerTag === "string" && help.containerTag.length > 0, "help.containerTag");
 expect(typeof help.tagSource === "string" && help.tagSource.length > 0, "help.tagSource");
 
-// tag algorithm: known origin → sha256[0:12]
-const norm = "github.com/wsks2233/mimocode-supermemory";
-const hash = createHash("sha256").update(norm).digest("hex").slice(0, 12);
-expect(hash === "c3d35c834ba4", `origin hash algorithm got ${hash}`);
-if (help.tagSource === "git-origin") {
-  expect(
-    String(help.containerTag).includes(hash),
-    `git-origin tag should embed ${hash}, got ${help.containerTag}`,
-  );
-}
+// tag algorithm now official getTags (16-hex identity)
+expect(typeof help.tagSource === "string" && help.tagSource.length > 0, "help.tagSource");
+expect(String(help.containerTag).includes("repo_"), "tag looks like repo_*");
+expect(srcText.includes("stripPrivateContent"), "privacy strip present");
+expect(srcText.includes("AGENT_ENTITY_CONTEXT"), "entity context present");
 
 expect(!srcText.includes('from "supermemory"'), "bundle must not import supermemory SDK");
 expect(srcText.includes("ipv4first") || srcText.includes("setDefaultResultOrder"), "ipv4 preference present");

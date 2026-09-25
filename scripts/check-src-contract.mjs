@@ -31,9 +31,9 @@ for (const needle of [
   "setDefaultResultOrder",
   "ipv4first",
   "projectContainerTag",
-  "git-origin",
-  "basename-or-path",
-  "config:projectContainerTag",
+  "normalizeGitRemote",
+  "getGeneratedProjectTag",
+  "official-getTags",
   "sm_capture_mode",
   "session.post",
   "experimental.chat.system.transform",
@@ -48,6 +48,9 @@ for (const needle of [
   "COMPACTION CONTEXT INJECTION",
   "permission.ask",
   'toolName === "supermemory"',
+  "stripPrivateContent",
+  "AGENT_ENTITY_CONTEXT",
+  "getPersonalReadTags",
 ]) {
   if (!all.includes(needle)) errors.push(`src missing contract token: ${needle}`);
 }

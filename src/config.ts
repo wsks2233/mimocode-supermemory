@@ -5,11 +5,14 @@ export type FileConfig = {
   baseUrl?: string;
   autoInject?: boolean;
   projectContainerTag?: string;
+  userContainerTag?: string;
+  containerTagPrefix?: string;
   keywordPatterns?: string[];
   /** Passive compaction: inject project memories into host compaction prompt. */
   compactionInject?: boolean;
   /** Passive compaction: write host checkpoint.md back to Supermemory. */
   compactionWriteback?: boolean;
+  captureEveryNTurns?: number;
   [key: string]: unknown;
 };
 
