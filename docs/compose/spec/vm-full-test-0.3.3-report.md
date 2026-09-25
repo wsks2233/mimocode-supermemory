@@ -38,7 +38,7 @@
 
 1. **T6 blocked by host `mimo run` EUNKNOWN** (PRE-EXISTING on this VM; not caused by plugin).
 2. **`api.supermemory.ai` flaky from VM** (T0 timeout, T5 succeeded later) → treat as network unless persistent.
-3. **`mimo plugin file:<nested cache>`** still prints Manifest ENOENT (host); stable path remains package-name + cache + plugin[].
+3. **`mimo plugin file:<nested cache>`** printed Manifest ENOENT (host); **installer 0.3.4+ skips `mimo plugin file:` when already under `packages\mimocode-supermemory@latest`** (still uses package-name + cache + plugin[]). Stable path remains package-name + cache.
 4. **User-confirmed package version 0.3.3**; after T7 cache is intentionally removed so version is not re-readable from disk.
 
 ## Overall conclusion

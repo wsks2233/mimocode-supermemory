@@ -177,6 +177,12 @@ function Get-PackageRoot {
   return (Get-Location).Path
 }
 
+function Test-RunningFromCache {
+  param([string]$root)
+  if (-not $root) { return $false }
+  return ($root -like "*\.cache\mimocode\packages\$pkgName@latest*")
+}
+
 function Install-Plugin {
   $p = Get-Paths
   $root = Get-PackageRoot
@@ -190,6 +196,9 @@ function Install-Plugin {
   $mimo = if ($mimoCmd) { $mimoCmd.Source } else { 'C:\Users\wsks\.mimocode\bin\mimo.exe' }
   if ($env:SUPERMEMORY_SKIP_MIMO_PLUGIN -eq '1') {
     Write-Host 'Skip mimo plugin file: (SUPERMEMORY_SKIP_MIMO_PLUGIN=1)'
+  } elseif (Test-RunningFromCache -root $root) {
+    # Host file: resolver cannot load from nested cache (Manifest ENOENT noise)
+    Write-Host "Skip mimo plugin file: (already in cache $pkgName@latest)"
   } elseif (Test-Path -LiteralPath $mimo) {
     Write-Host "Trying: mimo plugin file:$root (20s timeout, non-fatal)"
     $prevEap = $ErrorActionPreference
